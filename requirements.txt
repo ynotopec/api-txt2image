@@ -1,42 +1,23 @@
-##diffusers
-git+https://github.com/huggingface/diffusers.git
-#fastapi
-#uvicorn
-python-multipart
-aiofiles
-#safetensors
-#torchvision
-#pydantic
-huggingface-hub
-#Pillow
-#transformers
-#==4.52.0
-#accelerate
-#>=0.33
-#safetensors
-#>=0.4.5
-torchaudio
-#orjson
-
-
-# API & Web Framework
+# API
 fastapi>=0.112.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.8.0
 orjson>=3.10.0
 
-# Machine Learning & Generation
-#diffusers>=0.31.0
+# Diffusion stack
+diffusers @ git+https://github.com/huggingface/diffusers.git
 transformers>=4.43.0
 accelerate>=0.33.0
 safetensors>=0.4.3
+huggingface-hub>=0.24.0
 
-# Tokenizer Dependencies (Required for FLUX / T5-XXL)
+# FLUX/T5 tokenizer deps
 sentencepiece>=0.2.0
 protobuf>=5.27.0
 
-# Image Processing
+# Imaging + model runtime
 Pillow>=10.4.0
-
-# PyTorch
 torch>=2.4.0
+torchaudio>=2.4.0
+python-multipart>=0.0.9
+aiofiles>=23.2.1

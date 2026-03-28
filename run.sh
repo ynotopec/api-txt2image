@@ -13,18 +13,33 @@ REQ_HASH_FILE="${VENV_DIR}/.requirements.sha256"
 
 cd "$PROJECT_DIR"
 
-if ! command -v uv >/dev/null 2>&1; then
-  echo "[ERROR] uv is required but not installed. Run ./upgrade.sh first." >&2
+resolve_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    command -v uv
+    return 0
+  fi
+
+  if [[ -x "${HOME}/.local/bin/uv" ]]; then
+    printf '%s\n' "${HOME}/.local/bin/uv"
+    return 0
+  fi
+
+  return 1
+}
+
+if ! UV_BIN="$(resolve_uv)"; then
+  echo "[ERROR] uv is required but was not found in PATH or ~/.local/bin/uv." >&2
+  echo "[ERROR] Run ./upgrade.sh first." >&2
   exit 1
 fi
 
 mkdir -p "${HOME}/venv"
 
 if [[ ! -d "$VENV_DIR" ]]; then
-  uv venv "$VENV_DIR" >/dev/null
+  "$UV_BIN" venv "$VENV_DIR" >/dev/null
 elif [[ ! -x "$VENV_PYTHON" ]]; then
   echo "[WARN] Existing virtualenv at ${VENV_DIR} is incomplete. Recreating it."
-  uv venv --clear "$VENV_DIR" >/dev/null
+  "$UV_BIN" venv --clear "$VENV_DIR" >/dev/null
 fi
 
 CURRENT_HASH="$(sha256sum "$REQ_FILE" | awk '{print $1}')"
@@ -35,7 +50,7 @@ fi
 
 if [[ "$CURRENT_HASH" != "$INSTALLED_HASH" ]]; then
   echo "[INFO] Installing/updating dependencies from requirements.txt"
-  uv pip install --python "$VENV_PYTHON" -r "$REQ_FILE"
+  "$UV_BIN" pip install --python "$VENV_PYTHON" -r "$REQ_FILE"
   printf '%s' "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
   echo "[INFO] Dependencies already up to date (idempotent run)"
@@ -48,10 +63,15 @@ if [[ -f ".env" ]]; then
   set +a
 else
   echo "[WARN] .env file not found. Continuing with current environment variables."
-  echo "[WARN] Copy .env.example to .env and adjust values for production usage."
+  echo "[WARN] Copy .env.example to .env and set OPENAI_API_KEY."
 fi
 
-exec uv run --python "$VENV_PYTHON" \
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "[ERROR] OPENAI_API_KEY is required. Set it in environment or .env." >&2
+  exit 1
+fi
+
+exec "$UV_BIN" run --python "$VENV_PYTHON" \
   uvicorn app:app \
   --host "$IP" \
   --port "$PORT"

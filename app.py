@@ -20,8 +20,7 @@ from diffusers import AutoPipelineForText2Image
 # -----------------------------
 MODEL_ID = os.getenv(
     "MODEL_ID",
-#    "dataautogpt3/FluxteusV1",
-    "/home/ailab/.cache/huggingface/hub/models--dataautogpt3--OpenDalle/snapshots/2cab821ed09c47686a12493e0acf264e2246e166",
+    "dataautogpt3/OpenDalle",
 )
 
 # Prefer BF16 on H100 (good speed + stability)
