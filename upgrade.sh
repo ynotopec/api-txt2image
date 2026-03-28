@@ -15,7 +15,9 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 mkdir -p "${HOME}/venv"
-uv venv "$VENV_DIR"
+if [[ ! -d "$VENV_DIR" ]]; then
+  uv venv "$VENV_DIR"
+fi
 
 # Refresh base packaging tools first
 uv pip install --python "$VENV_PYTHON" --upgrade pip setuptools wheel

@@ -11,7 +11,7 @@ flowchart LR
     GPU[(CUDA / CPU runtime)]
 
     Client -->|POST /v1/images/generations| Uvicorn
-    Client -->|POST /generate_image/| Uvicorn
+    Client -->|GET /healthz| Uvicorn
     Uvicorn --> API
     API --> Auth
     API --> Queue
@@ -19,10 +19,11 @@ flowchart LR
     Pipeline --> GPU
     GPU --> Pipeline
     Pipeline --> API
-    API -->|PNG/JPEG or b64 JSON| Client
+    API -->|b64 JSON| Client
 ```
 
-## Notes
-- `run.sh` is idempotent: it recreates/uses `~/venv/<project-name>` and only reinstalls dependencies when `requirements.txt` changes.
-- `run.sh` is systemd friendly because it runs in foreground and `exec`s uvicorn.
-- `upgrade.sh` upgrades toolchain + project dependencies in the same virtualenv path.
+## Operational notes
+
+- `run.sh` is idempotent: it reuses `~/venv/<project-name>` and reinstalls dependencies only when `requirements.txt` changes.
+- `run.sh` runs in the foreground and uses `exec`, so it is compatible with systemd/container supervisors.
+- `upgrade.sh` performs explicit dependency upgrades in the same venv path.
