@@ -19,7 +19,13 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 mkdir -p "${HOME}/venv"
-uv venv "$VENV_DIR" >/dev/null
+
+if [[ ! -d "$VENV_DIR" ]]; then
+  uv venv "$VENV_DIR" >/dev/null
+elif [[ ! -x "$VENV_PYTHON" ]]; then
+  echo "[WARN] Existing virtualenv at ${VENV_DIR} is incomplete. Recreating it."
+  uv venv --clear "$VENV_DIR" >/dev/null
+fi
 
 CURRENT_HASH="$(sha256sum "$REQ_FILE" | awk '{print $1}')"
 INSTALLED_HASH=""
