@@ -86,6 +86,39 @@ StandardError=append:/var/log/api-txt2image_monitor.log
 WantedBy=multi-user.target
 ```
 
+## systemd troubleshooting
+
+If `systemctl status` shows `status=216/GROUP`, systemd failed **before** running `run.sh` because the configured group is invalid or unavailable.
+
+Typical causes:
+- `Group=ailab` does not exist on the host.
+- NSS/LDAP/group lookup is not ready when service starts.
+
+Fix options:
+
+1. Verify user/group exist:
+
+```bash
+id ailab
+getent group ailab
+```
+
+2. If group lookup fails, either create the group or remove the explicit `Group=` line and keep only:
+
+```ini
+User=ailab
+```
+
+3. Reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart api-txt2image
+sudo systemctl status api-txt2image
+```
+
+4. If you bind to a specific IP (`10.0.1.1`), ensure the interface owns that address at boot. Otherwise prefer `0.0.0.0`.
+
 ## Architecture
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the Mermaid diagram and flow notes.
