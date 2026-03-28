@@ -9,7 +9,7 @@ from typing import Optional, Literal, List, Tuple
 
 import torch
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
@@ -41,9 +41,6 @@ ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
 MAX_PIXELS = int(os.getenv("MAX_PIXELS", str(1024 * 1024)))  # 1MP by default
 REQUIRE_MULTIPLE_OF = int(os.getenv("REQUIRE_MULTIPLE_OF", "8"))
 
-# Output format for /generate_image/
-DEFAULT_STREAM_FORMAT = os.getenv("STREAM_FORMAT", "jpeg").lower()  # "jpeg" or "png"
-
 # -----------------------------
 # FastAPI
 # -----------------------------
@@ -61,15 +58,6 @@ pipe: Optional[AutoPipelineForText2Image] = None
 # -----------------------------
 # Request models
 # -----------------------------
-class ImagePrompt(BaseModel):
-    prompt: str = Field(..., min_length=1)
-    size: str = Field(default="1024x1024")
-    steps: int = Field(default=DEFAULT_STEPS, ge=1, le=150)
-    guidance_scale: float = Field(default=DEFAULT_GUIDANCE, ge=0.0, le=30.0)
-    seed: Optional[int] = Field(default=None, ge=0)
-    negative_prompt: Optional[str] = None
-
-
 class GenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1)
     n: int = Field(default=1, ge=1, le=8)
@@ -141,15 +129,6 @@ def encode_image_b64(img, fmt: str = "PNG") -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def get_media_type(fmt: str) -> str:
-    fmt = fmt.lower()
-    if fmt in ("jpg", "jpeg"):
-        return "image/jpeg"
-    if fmt == "png":
-        return "image/png"
-    return "application/octet-stream"
-
-
 async def generate_images(
     prompt: str,
     width: int,
@@ -205,8 +184,6 @@ def startup() -> None:
 #        # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
 #    ).to(device)
 
-
-    safety_check = None
     pipe = AutoPipelineForText2Image.from_pretrained(
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
@@ -260,32 +237,6 @@ def startup() -> None:
 def healthz():
     return {"ok": True, "model_id": MODEL_ID, "dtype": str(TORCH_DTYPE), "max_concurrent": MAX_CONCURRENT}
 
-
-@app.post("/generate_image/")
-async def generate_image(request_data: ImagePrompt):
-    # Unauthenticated convenience endpoint (keep or remove)
-    width, height = parse_size(request_data.size)
-
-    async with gpu_sem:
-        imgs = await generate_images(
-            prompt=request_data.prompt,
-            width=width,
-            height=height,
-            steps=request_data.steps,
-            guidance_scale=request_data.guidance_scale,
-            n=1,
-            seed=request_data.seed,
-            negative_prompt=request_data.negative_prompt,
-        )
-        img = imgs[0]
-
-    fmt = "JPEG" if DEFAULT_STREAM_FORMAT in ("jpeg", "jpg") else "PNG"
-    media = get_media_type(DEFAULT_STREAM_FORMAT)
-
-    buf = io.BytesIO()
-    img.save(buf, format=fmt)
-    buf.seek(0)
-    return StreamingResponse(buf, media_type=media)
 
 
 @app.post("/v1/images/generations")
