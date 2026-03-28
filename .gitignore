@@ -1,43 +1,45 @@
-# Byte-compiled / optimized / DLL files
+# Python bytecode / caches
 __pycache__/
 *.py[cod]
-*$py.class
-
-# C extensions
 *.so
-dist/
+
+# Build / packaging
 build/
+dist/
 *.egg-info/
 
-# Environment
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# Env and secrets
 .env
 .env.local
 .env.*.local
+secrets/
+*.key
+*.pem
 
-# IDE
+# Logs / temp
+*.log
+*.tmp
+*.temp
+
+# IDE / OS
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS generated files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# Virtual environments
-venv/
-env/
-ENV/
-.venv/
-
-# System
-*.tmp
-*.temp
-
-# Secrets
-secrets/
-*.key
-*.pem
+# Project local state
+*.pid
+.python-version
