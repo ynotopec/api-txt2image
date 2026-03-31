@@ -55,6 +55,7 @@ pipe: Optional[AutoPipelineForText2Image] = None
 last_used_at: float = time.time()
 idle_monitor_task: Optional[asyncio.Task] = None
 IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "3600"))
+IDLE_MONITOR_INTERVAL_SECONDS = float(os.getenv("IDLE_MONITOR_INTERVAL_SECONDS", "1"))
 
 
 # -----------------------------
@@ -237,9 +238,11 @@ async def ensure_pipe_loaded() -> None:
 async def idle_unload_loop() -> None:
     global last_used_at
     while True:
-        await asyncio.sleep(60)
         if IDLE_UNLOAD_SECONDS <= 0:
+            await asyncio.sleep(60)
             continue
+        poll_interval = max(0.1, min(IDLE_MONITOR_INTERVAL_SECONDS, float(IDLE_UNLOAD_SECONDS)))
+        await asyncio.sleep(poll_interval)
         idle_for = time.time() - last_used_at
         if idle_for < IDLE_UNLOAD_SECONDS:
             continue

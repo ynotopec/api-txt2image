@@ -37,6 +37,7 @@ Set values in `.env` (template provided in `.env.example`).
 The server supports automatic idle unload of the diffusion pipeline from GPU memory.
 
 - `IDLE_UNLOAD_SECONDS=3600` (default): unload model from GPU after 1 hour without image requests.
+- `IDLE_MONITOR_INTERVAL_SECONDS=1` (default): how frequently the idle monitor checks inactivity.
 - `IDLE_UNLOAD_SECONDS<=0`: disable idle unload behavior.
 
 After an unload, the next generation request lazily reloads the model, so that first request will have cold-start latency.
