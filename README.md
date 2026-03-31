@@ -32,6 +32,26 @@ Set values in `.env` (template provided in `.env.example`).
 - **Required**: `OPENAI_API_KEY`
 - **Optional**: all other variables have defaults in `app.py` (`MODEL_ID` defaults to `dataautogpt3/OpenDalle`)
 
+### Idle GPU unload
+
+The server supports automatic idle unload of the diffusion pipeline from GPU memory.
+
+- `IDLE_UNLOAD_SECONDS=3600` (default): unload model from GPU after 1 hour without image requests.
+- `IDLE_MONITOR_INTERVAL_SECONDS=1` (default): how frequently the idle monitor checks inactivity.
+- `IDLE_UNLOAD_SECONDS<=0`: disable idle unload behavior.
+
+After an unload, the next generation request lazily reloads the model, so that first request will have cold-start latency.
+
+### Environment variables
+
+Common `.env` entries are documented in `.env.example`, including:
+
+- model/runtime (`MODEL_ID`, `TORCH_DTYPE`, `MAX_CONCURRENT`)
+- generation defaults (`DEFAULT_STEPS`, `DEFAULT_GUIDANCE`)
+- guard rails (`ALLOWED_SIZES`, `MAX_PIXELS`, `REQUIRE_MULTIPLE_OF`)
+- optional toggles (`ENABLE_XFORMERS`, `TORCH_COMPILE`, `WARMUP`)
+- idle unload (`IDLE_UNLOAD_SECONDS`)
+
 ## Scripts
 
 ### `./run.sh [IP] [PORT]`

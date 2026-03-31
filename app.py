@@ -52,6 +52,10 @@ gpu_sem = asyncio.Semaphore(MAX_CONCURRENT)
 
 # Global pipeline
 pipe: Optional[AutoPipelineForText2Image] = None
+last_used_at: float = time.time()
+idle_monitor_task: Optional[asyncio.Task] = None
+IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "3600"))
+IDLE_MONITOR_INTERVAL_SECONDS = float(os.getenv("IDLE_MONITOR_INTERVAL_SECONDS", "1"))
 
 
 # -----------------------------
@@ -161,11 +165,7 @@ async def generate_images(
     return out.images
 
 
-# -----------------------------
-# Startup: init pipeline
-# -----------------------------
-@app.on_event("startup")
-def startup() -> None:
+def load_pipeline() -> None:
     global pipe
 
     # Perf toggles for Ampere/Hopper
@@ -177,20 +177,13 @@ def startup() -> None:
 
     # Load pipeline and use CPU if CUDA is not available
     device = "cuda" if torch.cuda.is_available() else "cpu"
-#    pipe = AutoPipelineForText2Image.from_pretrained(
-#        MODEL_ID,
-#        torch_dtype=TORCH_DTYPE,
-#        # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
-#    ).to(device)
-
     pipe = AutoPipelineForText2Image.from_pretrained(
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
         # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
-        safety_checker = None,
-        requires_safety_checker = False
+        safety_checker=None,
+        requires_safety_checker=False,
     ).to(device)
-
 
     pipe.set_progress_bar_config(disable=True)
 
@@ -212,6 +205,66 @@ def startup() -> None:
         except Exception as e:
             print(f"[WARN] torch.compile failed: {e}")
 
+
+def unload_pipeline() -> None:
+    global pipe
+    if pipe is None:
+        return
+
+    try:
+        pipe.to("cpu")
+    except Exception:
+        pass
+    del pipe
+    pipe = None
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        try:
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+    print("[INFO] pipeline unloaded from GPU due to idleness")
+
+
+async def ensure_pipe_loaded() -> None:
+    global pipe
+    if pipe is None:
+        print("[INFO] loading pipeline after idle unload")
+        load_pipeline()
+
+
+async def idle_unload_loop() -> None:
+    global last_used_at
+    while True:
+        if IDLE_UNLOAD_SECONDS <= 0:
+            await asyncio.sleep(60)
+            continue
+        poll_interval = max(0.1, min(IDLE_MONITOR_INTERVAL_SECONDS, float(IDLE_UNLOAD_SECONDS)))
+        await asyncio.sleep(poll_interval)
+        idle_for = time.time() - last_used_at
+        if idle_for < IDLE_UNLOAD_SECONDS:
+            continue
+        async with gpu_sem:
+            # Re-check after acquiring the semaphore to avoid races.
+            idle_for = time.time() - last_used_at
+            if idle_for >= IDLE_UNLOAD_SECONDS:
+                unload_pipeline()
+                # Avoid repeated unload attempts while still idle.
+                last_used_at = time.time()
+
+# -----------------------------
+# Startup: init pipeline
+# -----------------------------
+@app.on_event("startup")
+def startup() -> None:
+    global idle_monitor_task, last_used_at
+
+    load_pipeline()
+    last_used_at = time.time()
+    idle_monitor_task = asyncio.create_task(idle_unload_loop())
+
     # Warmup (small, fast)
     if os.getenv("WARMUP", "1") == "1":
         try:
@@ -229,6 +282,17 @@ def startup() -> None:
             print(f"[WARN] warmup failed: {e}")
 
 
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    global idle_monitor_task
+    if idle_monitor_task is not None:
+        idle_monitor_task.cancel()
+        try:
+            await idle_monitor_task
+        except asyncio.CancelledError:
+            pass
+
+
 # -----------------------------
 # Routes
 # -----------------------------
@@ -243,11 +307,14 @@ async def create_image_generation(
     req: GenerationRequest,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ):
+    global last_used_at
     validate_bearer(credentials)
 
     width, height = parse_size(req.size)
 
     async with gpu_sem:
+        await ensure_pipe_loaded()
+        last_used_at = time.time()
         imgs = await generate_images(
             prompt=req.prompt,
             width=width,
@@ -258,6 +325,7 @@ async def create_image_generation(
             seed=req.seed,
             negative_prompt=req.negative_prompt,
         )
+        last_used_at = time.time()
 
     data = [{"b64_json": encode_image_b64(img, fmt="PNG")} for img in imgs]
     return JSONResponse({"created": int(time.time()), "data": data})
