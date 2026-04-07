@@ -15,6 +15,7 @@ Minimal OpenAI-compatible text-to-image API powered by FastAPI + Diffusers.
 
 ```bash
 cp .env.example .env
+# edit .env and set OPENAI_API_KEY
 ./upgrade.sh
 ./run.sh 0.0.0.0 8000
 ```
@@ -23,6 +24,19 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/healthz
+```
+
+Image generation (OpenAI-compatible path):
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/images/generations \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a watercolor fox in a snowy forest",
+    "size": "1024x1024",
+    "n": 1
+  }'
 ```
 
 ## Configuration
@@ -50,7 +64,7 @@ Common `.env` entries are documented in `.env.example`, including:
 - generation defaults (`DEFAULT_STEPS`, `DEFAULT_GUIDANCE`)
 - guard rails (`ALLOWED_SIZES`, `MAX_PIXELS`, `REQUIRE_MULTIPLE_OF`)
 - optional toggles (`ENABLE_XFORMERS`, `TORCH_COMPILE`, `WARMUP`)
-- idle unload (`IDLE_UNLOAD_SECONDS`)
+- idle unload (`IDLE_UNLOAD_SECONDS`, `IDLE_MONITOR_INTERVAL_SECONDS`)
 
 ## Scripts
 
@@ -145,7 +159,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the Mermaid diagram and flow notes.
 
 ## API
 
-- `GET /healthz`
-- `POST /v1/images/generations`
+- `GET /healthz` (no auth)
+- `POST /v1/images/generations` (Bearer auth required)
 
 The image generation endpoint returns OpenAI-style `b64_json` payloads.
