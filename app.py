@@ -6,6 +6,7 @@ import base64
 import asyncio
 import secrets
 import warnings
+import inspect
 from typing import Optional, Literal, List, Tuple
 
 import torch
@@ -45,6 +46,7 @@ MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "1"))
 # Default generation params (safe-ish defaults; override per request)
 DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
+MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 
 # Size policy
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
@@ -135,7 +137,8 @@ def validate_bearer(credentials: HTTPAuthorizationCredentials) -> None:
 def make_generator(seed: Optional[int]) -> Optional[torch.Generator]:
     if seed is None:
         return None
-    return torch.Generator(device="cuda").manual_seed(int(seed))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return torch.Generator(device=device).manual_seed(int(seed))
 
 
 def encode_image_b64(img, fmt: str = "PNG") -> str:
@@ -160,19 +163,32 @@ async def generate_images(
 
     gen = make_generator(seed)
 
+    call_kwargs = {
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "num_inference_steps": steps,
+        "guidance_scale": guidance_scale,
+        "num_images_per_prompt": n,
+        "generator": gen,
+    }
+
+    # Support multiple diffusers pipelines (SDXL, FLUX, etc.) with one API.
+    # Only pass optional args if supported by the selected pipeline class.
+    call_sig = inspect.signature(pipe.__call__)
+    if negative_prompt is not None and "negative_prompt" in call_sig.parameters:
+        call_kwargs["negative_prompt"] = negative_prompt
+    if "max_sequence_length" in call_sig.parameters:
+        call_kwargs["max_sequence_length"] = MAX_SEQUENCE_LENGTH
+
     # For H100: bf16 + SDPA/Flash attention path (torch >= 2 recommended)
     # inference_mode + autocast reduces overhead & memory.
-    with torch.inference_mode(), torch.autocast("cuda", dtype=TORCH_DTYPE):
-        out = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            num_images_per_prompt=n,
-            generator=gen,
-        )
+    if torch.cuda.is_available():
+        with torch.inference_mode(), torch.autocast("cuda", dtype=TORCH_DTYPE):
+            out = pipe(**call_kwargs)
+    else:
+        with torch.inference_mode():
+            out = pipe(**call_kwargs)
 
     return out.images
 
@@ -187,11 +203,14 @@ def load_pipeline() -> None:
     except Exception:
         pass
 
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
     # Load pipeline and use CPU if CUDA is not available
     device = "cuda" if torch.cuda.is_available() else "cpu"
     pipe = AutoPipelineForText2Image.from_pretrained(
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
+        token=hf_token,
         # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
     ).to(device)
 
