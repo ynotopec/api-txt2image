@@ -5,6 +5,8 @@ import time
 import base64
 import asyncio
 import secrets
+import warnings
+import inspect
 from typing import Optional, Literal, List, Tuple
 
 import torch
@@ -13,7 +15,18 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from diffusers import AutoPipelineForText2Image
+from diffusers import AutoPipelineForText2Image, FluxPipeline
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Siglip2ImageProcessorFast.*deprecated.*",
+    category=FutureWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*local_dir_use_symlinks.*deprecated.*",
+    category=UserWarning,
+)
 
 # -----------------------------
 # Config (tuned for NVIDIA H100)
@@ -33,6 +46,8 @@ MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "1"))
 # Default generation params (safe-ish defaults; override per request)
 DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
+MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
+PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()  # flux|auto_t2i
 
 # Size policy
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
@@ -123,7 +138,8 @@ def validate_bearer(credentials: HTTPAuthorizationCredentials) -> None:
 def make_generator(seed: Optional[int]) -> Optional[torch.Generator]:
     if seed is None:
         return None
-    return torch.Generator(device="cuda").manual_seed(int(seed))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return torch.Generator(device=device).manual_seed(int(seed))
 
 
 def encode_image_b64(img, fmt: str = "PNG") -> str:
@@ -148,19 +164,32 @@ async def generate_images(
 
     gen = make_generator(seed)
 
+    call_kwargs = {
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "num_inference_steps": steps,
+        "guidance_scale": guidance_scale,
+        "num_images_per_prompt": n,
+        "generator": gen,
+    }
+
+    # Support multiple diffusers pipelines (SDXL, FLUX, etc.) with one API.
+    # Only pass optional args if supported by the selected pipeline class.
+    call_sig = inspect.signature(pipe.__call__)
+    if negative_prompt is not None and "negative_prompt" in call_sig.parameters:
+        call_kwargs["negative_prompt"] = negative_prompt
+    if "max_sequence_length" in call_sig.parameters:
+        call_kwargs["max_sequence_length"] = MAX_SEQUENCE_LENGTH
+
     # For H100: bf16 + SDPA/Flash attention path (torch >= 2 recommended)
     # inference_mode + autocast reduces overhead & memory.
-    with torch.inference_mode(), torch.autocast("cuda", dtype=TORCH_DTYPE):
-        out = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            num_images_per_prompt=n,
-            generator=gen,
-        )
+    if torch.cuda.is_available():
+        with torch.inference_mode(), torch.autocast("cuda", dtype=TORCH_DTYPE):
+            out = pipe(**call_kwargs)
+    else:
+        with torch.inference_mode():
+            out = pipe(**call_kwargs)
 
     return out.images
 
@@ -175,15 +204,37 @@ def load_pipeline() -> None:
     except Exception:
         pass
 
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+    local_files_only = os.getenv("LOCAL_FILES_ONLY", "0") == "1"
+    cache_dir = os.getenv("HF_HOME") or os.getenv("HUGGINGFACE_HUB_CACHE")
+
+    pipeline_loader = AutoPipelineForText2Image
+    resolved_pipeline_class = "auto_t2i"
+    if PIPELINE_CLASS == "flux":
+        pipeline_loader = FluxPipeline
+        resolved_pipeline_class = "flux"
+    else:
+        resolved_pipeline_class = "auto_t2i"
+
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", os.getenv("HF_HUB_ENABLE_HF_TRANSFER", "1"))
+    print(
+        "[INFO] Loading model="
+        f"'{MODEL_ID}' pipeline_class='{resolved_pipeline_class}' dtype='{TORCH_DTYPE}' "
+        f"local_files_only={local_files_only} cache_dir='{cache_dir or 'default'}' "
+        f"hf_transfer={os.getenv('HF_HUB_ENABLE_HF_TRANSFER')}"
+    )
+
     # Load pipeline and use CPU if CUDA is not available
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    pipe = AutoPipelineForText2Image.from_pretrained(
+    t0 = time.perf_counter()
+    pipe = pipeline_loader.from_pretrained(
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
+        token=hf_token,
+        local_files_only=local_files_only,
         # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
-        safety_checker=None,
-        requires_safety_checker=False,
     ).to(device)
+    print(f"[INFO] Pipeline loaded in {time.perf_counter() - t0:.1f}s on device='{device}'")
 
     pipe.set_progress_bar_config(disable=True)
 
@@ -265,9 +316,11 @@ def startup() -> None:
     last_used_at = time.time()
     idle_monitor_task = asyncio.create_task(idle_unload_loop())
 
-    # Warmup (small, fast)
-    if os.getenv("WARMUP", "1") == "1":
+    # Warmup can significantly delay startup on large/newer pipelines.
+    # Keep it opt-in so the API becomes ready as soon as model loading finishes.
+    if os.getenv("WARMUP", "0") == "1":
         try:
+            print("[INFO] warmup started")
             _ = pipe(
                 prompt="warmup",
                 width=512,
@@ -276,10 +329,13 @@ def startup() -> None:
                 guidance_scale=1.0,
                 num_images_per_prompt=1,
             )
-            torch.cuda.synchronize()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
             print("[INFO] warmup done")
         except Exception as e:
             print(f"[WARN] warmup failed: {e}")
+    else:
+        print("[INFO] warmup skipped (set WARMUP=1 to enable)")
 
 
 @app.on_event("shutdown")
