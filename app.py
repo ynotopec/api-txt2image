@@ -322,9 +322,11 @@ def startup() -> None:
     last_used_at = time.time()
     idle_monitor_task = asyncio.create_task(idle_unload_loop())
 
-    # Warmup (small, fast)
-    if os.getenv("WARMUP", "1") == "1":
+    # Warmup can significantly delay startup on large/newer pipelines.
+    # Keep it opt-in so the API becomes ready as soon as model loading finishes.
+    if os.getenv("WARMUP", "0") == "1":
         try:
+            print("[INFO] warmup started")
             _ = pipe(
                 prompt="warmup",
                 width=512,
@@ -333,10 +335,13 @@ def startup() -> None:
                 guidance_scale=1.0,
                 num_images_per_prompt=1,
             )
-            torch.cuda.synchronize()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
             print("[INFO] warmup done")
         except Exception as e:
             print(f"[WARN] warmup failed: {e}")
+    else:
+        print("[INFO] warmup skipped (set WARMUP=1 to enable)")
 
 
 @app.on_event("shutdown")
