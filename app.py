@@ -15,7 +15,8 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from diffusers import AutoPipelineForText2Image
+from diffusers import AutoPipelineForText2Image, FluxPipeline
+from huggingface_hub import HfApi
 
 warnings.filterwarnings(
     "ignore",
@@ -47,6 +48,7 @@ MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "1"))
 DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
+PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto").strip().lower()  # auto|flux|auto_t2i
 
 # Size policy
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
@@ -205,9 +207,35 @@ def load_pipeline() -> None:
 
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
 
+    pipeline_loader = AutoPipelineForText2Image
+    resolved_pipeline_class = PIPELINE_CLASS
+    if PIPELINE_CLASS == "auto":
+        try:
+            info = HfApi(token=hf_token).model_info(MODEL_ID)
+            tags = {t.lower() for t in (info.tags or [])}
+            is_flux = (
+                "fluxpipeline" in tags
+                or "flux" in tags
+                or any("base_model:black-forest-labs/flux" in t for t in tags)
+            )
+            if is_flux:
+                pipeline_loader = FluxPipeline
+                resolved_pipeline_class = "flux"
+            else:
+                resolved_pipeline_class = "auto_t2i"
+        except Exception as e:
+            print(f"[WARN] Unable to infer pipeline type from HF metadata, fallback to AutoPipeline: {e}")
+            resolved_pipeline_class = "auto_t2i"
+    elif PIPELINE_CLASS == "flux":
+        pipeline_loader = FluxPipeline
+    else:
+        resolved_pipeline_class = "auto_t2i"
+
+    print(f"[INFO] Loading model='{MODEL_ID}' with pipeline_class='{resolved_pipeline_class}'")
+
     # Load pipeline and use CPU if CUDA is not available
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    pipe = AutoPipelineForText2Image.from_pretrained(
+    pipe = pipeline_loader.from_pretrained(
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
         token=hf_token,
