@@ -16,7 +16,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from diffusers import AutoPipelineForText2Image, FluxPipeline
-from huggingface_hub import HfApi
 
 warnings.filterwarnings(
     "ignore",
@@ -48,7 +47,7 @@ MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "1"))
 DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
-PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto").strip().lower()  # auto|flux|auto_t2i
+PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()  # flux|auto_t2i
 
 # Size policy
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
@@ -206,41 +205,36 @@ def load_pipeline() -> None:
         pass
 
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+    local_files_only = os.getenv("LOCAL_FILES_ONLY", "0") == "1"
+    cache_dir = os.getenv("HF_HOME") or os.getenv("HUGGINGFACE_HUB_CACHE")
 
     pipeline_loader = AutoPipelineForText2Image
-    resolved_pipeline_class = PIPELINE_CLASS
-    if PIPELINE_CLASS == "auto":
-        try:
-            info = HfApi(token=hf_token).model_info(MODEL_ID)
-            tags = {t.lower() for t in (info.tags or [])}
-            is_flux = (
-                "fluxpipeline" in tags
-                or "flux" in tags
-                or any("base_model:black-forest-labs/flux" in t for t in tags)
-            )
-            if is_flux:
-                pipeline_loader = FluxPipeline
-                resolved_pipeline_class = "flux"
-            else:
-                resolved_pipeline_class = "auto_t2i"
-        except Exception as e:
-            print(f"[WARN] Unable to infer pipeline type from HF metadata, fallback to AutoPipeline: {e}")
-            resolved_pipeline_class = "auto_t2i"
-    elif PIPELINE_CLASS == "flux":
+    resolved_pipeline_class = "auto_t2i"
+    if PIPELINE_CLASS == "flux":
         pipeline_loader = FluxPipeline
+        resolved_pipeline_class = "flux"
     else:
         resolved_pipeline_class = "auto_t2i"
 
-    print(f"[INFO] Loading model='{MODEL_ID}' with pipeline_class='{resolved_pipeline_class}'")
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", os.getenv("HF_HUB_ENABLE_HF_TRANSFER", "1"))
+    print(
+        "[INFO] Loading model="
+        f"'{MODEL_ID}' pipeline_class='{resolved_pipeline_class}' dtype='{TORCH_DTYPE}' "
+        f"local_files_only={local_files_only} cache_dir='{cache_dir or 'default'}' "
+        f"hf_transfer={os.getenv('HF_HUB_ENABLE_HF_TRANSFER')}"
+    )
 
     # Load pipeline and use CPU if CUDA is not available
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    t0 = time.perf_counter()
     pipe = pipeline_loader.from_pretrained(
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
         token=hf_token,
+        local_files_only=local_files_only,
         # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
     ).to(device)
+    print(f"[INFO] Pipeline loaded in {time.perf_counter() - t0:.1f}s on device='{device}'")
 
     pipe.set_progress_bar_config(disable=True)
 
