@@ -5,6 +5,7 @@ import time
 import base64
 import asyncio
 import secrets
+import warnings
 from typing import Optional, Literal, List, Tuple
 
 import torch
@@ -14,6 +15,17 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from diffusers import AutoPipelineForText2Image
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Siglip2ImageProcessorFast.*deprecated.*",
+    category=FutureWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*local_dir_use_symlinks.*deprecated.*",
+    category=UserWarning,
+)
 
 # -----------------------------
 # Config (tuned for NVIDIA H100)
@@ -181,8 +193,6 @@ def load_pipeline() -> None:
         MODEL_ID,
         torch_dtype=TORCH_DTYPE,
         # variant="fp16",  # uncomment if your repo has fp16 variant; for bf16 often not needed
-        safety_checker=None,
-        requires_safety_checker=False,
     ).to(device)
 
     pipe.set_progress_bar_config(disable=True)
