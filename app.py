@@ -7,7 +7,7 @@ import asyncio
 import secrets
 import warnings
 import inspect
-from typing import Optional, Literal, List, Tuple
+from typing import Optional, Literal, List, Tuple, Set
 
 import torch
 from fastapi import FastAPI, HTTPException, Depends
@@ -124,14 +124,34 @@ def parse_size(size_str: str) -> Tuple[int, int]:
     return w, h
 
 
-def validate_bearer(credentials: HTTPAuthorizationCredentials) -> None:
-    expected = os.getenv("OPENAI_API_KEY")
-    if not expected:
-        # Fail closed: you can set OPENAI_API_KEY in the env
-        raise HTTPException(status_code=500, detail="Server misconfigured: OPENAI_API_KEY not set.")
+def get_expected_api_keys() -> Set[str]:
+    keys_env = os.getenv("OPENAI_API_KEYS", "")
+    single_key_env = os.getenv("OPENAI_API_KEY", "")
 
-    token = credentials.credentials or ""
-    if not secrets.compare_digest(token, expected):
+    # Accept either:
+    # - OPENAI_API_KEY=single-token
+    # - OPENAI_API_KEYS=token1,token2,token3
+    # If both are set, combine them.
+    raw_keys: List[str] = []
+    if keys_env:
+        raw_keys.extend(keys_env.replace("\n", ",").split(","))
+    if single_key_env:
+        raw_keys.append(single_key_env)
+
+    return {k.strip() for k in raw_keys if k.strip()}
+
+
+def validate_bearer(credentials: HTTPAuthorizationCredentials) -> None:
+    expected_keys = get_expected_api_keys()
+    if not expected_keys:
+        # Fail closed: configure OPENAI_API_KEY and/or OPENAI_API_KEYS in the env.
+        raise HTTPException(
+            status_code=500,
+            detail="Server misconfigured: OPENAI_API_KEY or OPENAI_API_KEYS must be set.",
+        )
+
+    token = (credentials.credentials or "").strip()
+    if not any(secrets.compare_digest(token, expected) for expected in expected_keys):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 

@@ -9,13 +9,13 @@ Minimal OpenAI-compatible text-to-image API powered by FastAPI + Diffusers.
 - **Predictable virtualenv**: always uses `~/venv/<project-name>`.
 - **`uv`-based workflow**: fast env + package management.
 - **Foreground runtime**: `run.sh` `exec`s uvicorn (systemd/container friendly).
-- **Single mandatory setting**: only `OPENAI_API_KEY` is required.
+- **Auth options**: set `OPENAI_API_KEY` (single token) or `OPENAI_API_KEYS` (comma-separated list).
 
 ## Quick start
 
 ```bash
 cp .env.example .env
-# edit .env and set OPENAI_API_KEY
+# edit .env and set OPENAI_API_KEY (or OPENAI_API_KEYS)
 ./upgrade.sh
 ./run.sh 0.0.0.0 8000
 ```
@@ -43,7 +43,7 @@ curl -X POST http://127.0.0.1:8000/v1/images/generations \
 
 Set values in `.env` (template provided in `.env.example`).
 
-- **Required**: `OPENAI_API_KEY`
+- **Required**: `OPENAI_API_KEY` or `OPENAI_API_KEYS`
 - **Optional**: all other variables have defaults in `app.py` (`MODEL_ID` defaults to `dataautogpt3/OpenDalle`)
 
 ### Idle GPU unload
@@ -73,7 +73,7 @@ Common `.env` entries are documented in `.env.example`, including:
 - Creates/repairs `~/venv/<project-name>`.
 - Installs deps if and only if `requirements.txt` changed.
 - Loads `.env` if present.
-- Fails fast if `OPENAI_API_KEY` is missing.
+- Fails fast if both `OPENAI_API_KEY` and `OPENAI_API_KEYS` are missing.
 - Starts uvicorn in foreground (`exec ...`) for process managers.
 
 Examples:
