@@ -63,11 +63,11 @@ if [[ -f ".env" ]]; then
   set +a
 else
   echo "[WARN] .env file not found. Continuing with current environment variables."
-  echo "[WARN] Copy .env.example to .env and set OPENAI_API_KEY."
+  echo "[WARN] Copy .env.example to .env and set OPENAI_API_KEY or OPENAI_API_KEYS."
 fi
 
-if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-  echo "[ERROR] OPENAI_API_KEY is required. Set it in environment or .env." >&2
+if [[ -z "${OPENAI_API_KEY:-}" && -z "${OPENAI_API_KEYS:-}" ]]; then
+  echo "[ERROR] OPENAI_API_KEY or OPENAI_API_KEYS is required. Set one in environment or .env." >&2
   exit 1
 fi
 
