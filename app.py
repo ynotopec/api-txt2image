@@ -8,6 +8,7 @@ import secrets
 import warnings
 import inspect
 import gc
+import ctypes
 from typing import Optional, Literal, List, Tuple, Set
 
 import torch
@@ -53,6 +54,7 @@ REQUIRE_MULTIPLE_OF = int(os.getenv("REQUIRE_MULTIPLE_OF", "8"))
 # <= 0 disables idle unload.
 IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "450"))
 IDLE_MONITOR_INTERVAL_SECONDS = float(os.getenv("IDLE_MONITOR_INTERVAL_SECONDS", "30"))
+LOAD_PIPELINE_ON_STARTUP = os.getenv("LOAD_PIPELINE_ON_STARTUP", "0") == "1"
 
 # -----------------------------
 # FastAPI
@@ -260,6 +262,14 @@ def unload_pipeline() -> None:
 
     gc.collect()
 
+    # Best effort: return free heap arenas to the OS on glibc systems.
+    # This helps lower RSS after deleting large Python objects.
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except Exception:
+        pass
+
     if torch.cuda.is_available():
         try:
             torch.cuda.synchronize()
@@ -382,12 +392,17 @@ async def generate_images(
 async def startup() -> None:
     global idle_monitor_task, last_used_at
 
-    await asyncio.to_thread(load_pipeline)
-    last_used_at = time.time()
+    if LOAD_PIPELINE_ON_STARTUP:
+        await asyncio.to_thread(load_pipeline)
+        last_used_at = time.time()
+        print("[INFO] pipeline preloaded at startup (LOAD_PIPELINE_ON_STARTUP=1)")
+    else:
+        print("[INFO] lazy loading enabled: pipeline will load on first request")
+        last_used_at = time.time()
 
     idle_monitor_task = asyncio.create_task(idle_unload_loop())
 
-    if os.getenv("WARMUP", "0") == "1":
+    if os.getenv("WARMUP", "0") == "1" and LOAD_PIPELINE_ON_STARTUP:
         try:
             print("[INFO] warmup started")
 
@@ -409,7 +424,10 @@ async def startup() -> None:
         except Exception as e:
             print(f"[WARN] warmup failed: {e}")
     else:
-        print("[INFO] warmup skipped (set WARMUP=1 to enable)")
+        if os.getenv("WARMUP", "0") == "1" and not LOAD_PIPELINE_ON_STARTUP:
+            print("[INFO] warmup skipped because LOAD_PIPELINE_ON_STARTUP=0")
+        else:
+            print("[INFO] warmup skipped (set WARMUP=1 to enable)")
 
 
 @app.on_event("shutdown")
