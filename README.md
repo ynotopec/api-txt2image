@@ -1,165 +1,59 @@
 # api-txt2image
 
-Minimal OpenAI-compatible text-to-image API powered by FastAPI + Diffusers.
+Minimal, token-protected, OpenAI-compatible text-to-image API for NVIDIA H100
+and DGX Spark (aarch64), built with FastAPI, Diffusers, PyTorch, and `uv`.
 
-## What this repo now optimizes for
-
-- **Simple operations**: one app file (`app.py`) and two scripts (`run.sh`, `upgrade.sh`).
-- **Idempotent startup**: `run.sh` only reinstalls dependencies when `requirements.txt` changes.
-- **Predictable virtualenv**: always uses `~/venv/<project-name>`.
-- **`uv`-based workflow**: fast env + package management.
-- **Foreground runtime**: `run.sh` `exec`s uvicorn (systemd/container friendly).
-- **Auth options**: set `OPENAI_API_KEY` (single token) or `OPENAI_API_KEYS` (comma-separated list).
-
-## Quick start
+## Start
 
 ```bash
-cp .env.example .env
-# edit .env and set OPENAI_API_KEY (or OPENAI_API_KEYS)
-./upgrade.sh
-./run.sh 0.0.0.0 8000
+cp .env.example .env               # change OPENAI_API_KEY
+./install.sh                        # safe for first install and upgrades
+source run.sh [IP] [PORT]           # PORT is optional; a free port is selected
 ```
 
-Health check:
+The environment is always stored at `~/venv/<project-directory-name>`. Both
+scripts are idempotent; normal starts only install when `requirements.txt`
+changes. `./upgrade.sh` remains as an alias for `./install.sh`.
+
+Generate an image using the widely supported OpenAI Images API shape:
 
 ```bash
-curl http://127.0.0.1:8000/healthz
-```
-
-Image generation (OpenAI-compatible path):
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/images/generations \
+BASE_URL=http://127.0.0.1:8000
+curl "$BASE_URL/v1/images/generations" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "a watercolor fox in a snowy forest",
-    "size": "1024x1024",
-    "n": 1
-  }'
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"a small robot painting","size":"1024x1024"}'
 ```
 
-## Configuration
+The response contains `data[].b64_json`. Health is available without a token at
+`GET /healthz`. Interactive API documentation is at `/docs`.
 
-Set values in `.env` (template provided in `.env.example`).
+## User service
 
-- **Required**: `OPENAI_API_KEY` or `OPENAI_API_KEYS`
-- **Optional**: all other variables have defaults in `app.py` (`MODEL_ID` defaults to `dataautogpt3/OpenDalle`)
-
-### Idle GPU unload
-
-The server supports automatic idle unload of the diffusion pipeline from GPU memory.
-
-- `IDLE_UNLOAD_SECONDS=3600` (default): unload model from GPU after 1 hour without image requests.
-- `IDLE_MONITOR_INTERVAL_SECONDS=1` (default): how frequently the idle monitor checks inactivity.
-- `IDLE_UNLOAD_SECONDS<=0`: disable idle unload behavior.
-
-After an unload, the next generation request lazily reloads the model, so that first request will have cold-start latency.
-
-### Environment variables
-
-Common `.env` entries are documented in `.env.example`, including:
-
-- model/runtime (`MODEL_ID`, `TORCH_DTYPE`, `MAX_CONCURRENT`)
-- generation defaults (`DEFAULT_STEPS`, `DEFAULT_GUIDANCE`)
-- guard rails (`ALLOWED_SIZES`, `MAX_PIXELS`, `REQUIRE_MULTIPLE_OF`)
-- optional toggles (`ENABLE_XFORMERS`, `TORCH_COMPILE`, `WARMUP`)
-- idle unload (`IDLE_UNLOAD_SECONDS`, `IDLE_MONITOR_INTERVAL_SECONDS`)
-
-## Scripts
-
-### `./run.sh [IP] [PORT]`
-
-- Creates/repairs `~/venv/<project-name>`.
-- Installs deps if and only if `requirements.txt` changed.
-- Loads `.env` if present.
-- Fails fast if both `OPENAI_API_KEY` and `OPENAI_API_KEYS` are missing.
-- Starts uvicorn in foreground (`exec ...`) for process managers.
-
-Examples:
-
-```bash
-./run.sh
-./run.sh 127.0.0.1 9000
-```
-
-### `./upgrade.sh`
-
-- Ensures `uv` is installed.
-- Ensures `~/venv/<project-name>` exists.
-- Upgrades packaging tools + project requirements.
-
-Run anytime:
-
-```bash
-./upgrade.sh
-```
-
-## systemd example
-
-Use direct exec (no `bash -c`) and prefer `0.0.0.0` unless you must bind a specific interface IP.
+`run.sh` stays in the foreground and uses `exec`, so it works directly with
+`systemctl --user` (a shell `source` is not needed inside the unit):
 
 ```ini
 [Unit]
-Description=api-txt2image
-Wants=network-online.target
+Description=OpenAI-compatible text-to-image API
 After=network-online.target
 
 [Service]
 Type=simple
-User=ailab
-WorkingDirectory=/home/ailab/api-txt2image
-EnvironmentFile=/home/ailab/api-txt2image/.env
-ExecStart=/home/ailab/api-txt2image/run.sh 0.0.0.0 8522
-Restart=always
-RestartSec=10
-StandardOutput=append:/var/log/api-txt2image_monitor.log
-StandardError=append:/var/log/api-txt2image_monitor.log
+WorkingDirectory=%h/api-txt2image
+EnvironmentFile=%h/api-txt2image/.env
+ExecStart=%h/api-txt2image/run.sh 0.0.0.0 8000
+Restart=on-failure
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
-
-## systemd troubleshooting
-
-If `systemctl status` shows `status=216/GROUP`, systemd failed **before** running `run.sh` because the configured group is invalid or unavailable.
-
-Typical causes:
-- `Group=ailab` does not exist on the host.
-- NSS/LDAP/group lookup is not ready when service starts.
-
-Fix options:
-
-1. Verify user/group exist:
 
 ```bash
-id ailab
-getent group ailab
+mkdir -p ~/.config/systemd/user
+# save the unit as ~/.config/systemd/user/api-txt2image.service
+systemctl --user daemon-reload
+systemctl --user enable --now api-txt2image
 ```
 
-2. If group lookup fails, either create the group or remove the explicit `Group=` line and keep only:
-
-```ini
-User=ailab
-```
-
-3. Reload and restart:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart api-txt2image
-sudo systemctl status api-txt2image
-```
-
-4. If you bind to a specific IP (`10.0.1.1`), ensure the interface owns that address at boot. Otherwise prefer `0.0.0.0`.
-
-## Architecture
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the Mermaid diagram and flow notes.
-
-## API
-
-- `GET /healthz` (no auth)
-- `POST /v1/images/generations` (Bearer auth required)
-
-The image generation endpoint returns OpenAI-style `b64_json` payloads.
+Important configuration and defaults are documented in `.env.example`.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IP="${1:-0.0.0.0}"
-PORT="${2:-8000}"
+IP="${1:-${HOST:-0.0.0.0}}"
+PORT="${2:-${PORT:-}}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
@@ -28,18 +28,18 @@ resolve_uv() {
 }
 
 if ! UV_BIN="$(resolve_uv)"; then
-  echo "[ERROR] uv is required but was not found in PATH or ~/.local/bin/uv." >&2
-  echo "[ERROR] Run ./upgrade.sh first." >&2
-  exit 1
+  echo "[INFO] uv is not installed; running install.sh"
+  "${PROJECT_DIR}/install.sh"
+  UV_BIN="$(resolve_uv)"
 fi
 
 mkdir -p "${HOME}/venv"
 
 if [[ ! -d "$VENV_DIR" ]]; then
-  "$UV_BIN" venv "$VENV_DIR" >/dev/null
+  "$UV_BIN" venv --system-site-packages "$VENV_DIR" >/dev/null
 elif [[ ! -x "$VENV_PYTHON" ]]; then
   echo "[WARN] Existing virtualenv at ${VENV_DIR} is incomplete. Recreating it."
-  "$UV_BIN" venv --clear "$VENV_DIR" >/dev/null
+  "$UV_BIN" venv --clear --system-site-packages "$VENV_DIR" >/dev/null
 fi
 
 CURRENT_HASH="$(sha256sum "$REQ_FILE" | awk '{print $1}')"
@@ -49,11 +49,19 @@ if [[ -f "$REQ_HASH_FILE" ]]; then
 fi
 
 if [[ "$CURRENT_HASH" != "$INSTALLED_HASH" ]]; then
-  echo "[INFO] Installing/updating dependencies from requirements.txt"
-  "$UV_BIN" pip install --python "$VENV_PYTHON" -r "$REQ_FILE"
-  printf '%s' "$CURRENT_HASH" > "$REQ_HASH_FILE"
+  "${PROJECT_DIR}/install.sh"
 else
   echo "[INFO] Dependencies already up to date (idempotent run)"
+fi
+
+if [[ -z "$PORT" ]]; then
+  PORT="$($VENV_PYTHON -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')"
+  echo "[INFO] Selected free port ${PORT}"
+fi
+
+if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+  echo "[ERROR] PORT must be an integer from 1 to 65535." >&2
+  exit 2
 fi
 
 if [[ -f ".env" ]]; then
@@ -71,7 +79,6 @@ if [[ -z "${OPENAI_API_KEY:-}" && -z "${OPENAI_API_KEYS:-}" ]]; then
   exit 1
 fi
 
-exec "$UV_BIN" run --python "$VENV_PYTHON" \
-  uvicorn app:app \
+exec "$VENV_PYTHON" -m uvicorn app:app \
   --host "$IP" \
   --port "$PORT"
