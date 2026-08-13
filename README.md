@@ -28,6 +28,25 @@ curl "$BASE_URL/v1/images/generations" \
 The response contains `data[].b64_json`. Health is available without a token at
 `GET /healthz`. Interactive API documentation is at `/docs`.
 
+## Quantized Krea 2 Turbo
+
+The `OzzyGT/Krea_2_Turbo_nunchaku_lite_nvfp4` repository can be selected through
+the existing Diffusers loader. It contains 4-bit components, so the project
+installs `bitsandbytes>=0.46.1` as part of its runtime dependencies. Recommended
+settings from the model example are:
+
+```env
+MODEL_ID=OzzyGT/Krea_2_Turbo_nunchaku_lite_nvfp4
+PIPELINE_CLASS=auto_t2i
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=8
+DEFAULT_GUIDANCE=0.0
+```
+
+Run `./install.sh` again after updating an existing checkout so the new
+dependency is installed. The first generation request downloads and loads the
+model unless pipeline preloading is enabled.
+
 ## User service
 
 `run.sh` stays in the foreground and uses `exec`, so it works directly with
