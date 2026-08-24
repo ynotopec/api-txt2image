@@ -17,7 +17,13 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from diffusers import AutoPipelineForText2Image, FluxPipeline, SanaSprintPipeline, ZImagePipeline
+from diffusers import (
+    AutoPipelineForText2Image,
+    FluxPipeline,
+    SanaSprintPipeline,
+    ZImagePipeline,
+    ZImageTransformer2DModel,
+)
 
 warnings.filterwarnings(
     "ignore",
@@ -44,6 +50,7 @@ DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
+Z_IMAGE_BASE_MODEL_ID = os.getenv("Z_IMAGE_BASE_MODEL_ID", "Tongyi-MAI/Z-Image-Turbo")
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -233,7 +240,17 @@ def load_pipeline() -> None:
 
     if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(".safetensors"):
         single_file_model_id = normalize_single_file_model_id(MODEL_ID)
-        pipe = pipeline_loader.from_single_file(single_file_model_id, **load_kwargs).to(device)
+        transformer = ZImageTransformer2DModel.from_single_file(
+            single_file_model_id,
+            config=Z_IMAGE_BASE_MODEL_ID,
+            subfolder="transformer",
+            **load_kwargs,
+        )
+        pipe = pipeline_loader.from_pretrained(
+            Z_IMAGE_BASE_MODEL_ID,
+            transformer=transformer,
+            **load_kwargs,
+        ).to(device)
     else:
         pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
 

@@ -72,6 +72,7 @@ explicit `ZImagePipeline` loader:
 ```env
 MODEL_ID=https://huggingface.co/Comfy-Org/z_image_turbo/blob/main/split_files/diffusion_models/z_image_turbo_nvfp4.safetensors
 PIPELINE_CLASS=z_image
+Z_IMAGE_BASE_MODEL_ID=Tongyi-MAI/Z-Image-Turbo
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=9
 DEFAULT_GUIDANCE=0.0
@@ -85,6 +86,12 @@ For compatibility with existing configurations, the API also normalizes a
 `/resolve/main/` URL before passing it to Diffusers. As with the other models,
 the checkpoint is fetched on the first request unless startup preloading is
 enabled.
+
+The Comfy-Org file contains only the quantized diffusion transformer, not the
+Qwen3 text encoder, tokenizer, VAE, or scheduler. The service therefore loads
+that file as `ZImageTransformer2DModel` and obtains the missing pipeline
+components from `Z_IMAGE_BASE_MODEL_ID`. Point this variable at a local copy of
+the base repository when using `LOCAL_FILES_ONLY=1`.
 
 ## User service
 
