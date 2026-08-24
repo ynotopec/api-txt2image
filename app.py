@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from diffusers import AutoPipelineForText2Image, FluxPipeline
+from diffusers import AutoPipelineForText2Image, FluxPipeline, SanaSprintPipeline
 
 warnings.filterwarnings(
     "ignore",
@@ -189,6 +189,9 @@ def load_pipeline() -> None:
     if PIPELINE_CLASS == "flux":
         pipeline_loader = FluxPipeline
         resolved_pipeline_class = "flux"
+    elif PIPELINE_CLASS == "sana_sprint":
+        pipeline_loader = SanaSprintPipeline
+        resolved_pipeline_class = "sana_sprint"
     else:
         pipeline_loader = AutoPipelineForText2Image
         resolved_pipeline_class = "auto_t2i"

@@ -47,6 +47,23 @@ Run `./install.sh` again after updating an existing checkout so the new
 dependency is installed. The first generation request downloads and loads the
 model unless pipeline preloading is enabled.
 
+## Sana Sprint 0.6B
+
+Sana Sprint declares `SanaSprintPipeline`, which Diffusers' generic
+`AutoPipelineForText2Image` does not currently resolve. Select its explicit
+loader through the environment:
+
+```env
+MODEL_ID=Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers
+PIPELINE_CLASS=sana_sprint
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=2
+DEFAULT_GUIDANCE=0.0
+```
+
+The pipeline accepts the same image-generation endpoint and request shape as
+the other supported models.
+
 ## User service
 
 `run.sh` stays in the foreground and uses `exec`, so it works directly with
