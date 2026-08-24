@@ -161,6 +161,16 @@ def encode_image_b64(img, fmt: str = "PNG") -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+def normalize_single_file_model_id(model_id: str) -> str:
+    """Return a Hugging Face URL in the form expected by Diffusers.
+
+    Diffusers' single-file URL parser strips ``blob/main`` before handing the
+    repository and filename to ``hf_hub_download``. A direct ``resolve/main``
+    URL is not stripped and would therefore duplicate that path segment.
+    """
+    return model_id.replace("/resolve/main/", "/blob/main/", 1)
+
+
 # -----------------------------
 # Pipeline lifecycle
 # -----------------------------
@@ -222,7 +232,8 @@ def load_pipeline() -> None:
         load_kwargs["cache_dir"] = cache_dir
 
     if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(".safetensors"):
-        pipe = pipeline_loader.from_single_file(MODEL_ID, **load_kwargs).to(device)
+        single_file_model_id = normalize_single_file_model_id(MODEL_ID)
+        pipe = pipeline_loader.from_single_file(single_file_model_id, **load_kwargs).to(device)
     else:
         pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
 

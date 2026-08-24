@@ -70,7 +70,7 @@ The Comfy-Org single-file NVFP4 checkpoint can be loaded with Diffusers'
 explicit `ZImagePipeline` loader:
 
 ```env
-MODEL_ID=https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_nvfp4.safetensors
+MODEL_ID=https://huggingface.co/Comfy-Org/z_image_turbo/blob/main/split_files/diffusion_models/z_image_turbo_nvfp4.safetensors
 PIPELINE_CLASS=z_image
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=9
@@ -79,10 +79,12 @@ DEFAULT_GUIDANCE=0.0
 
 Run `./install.sh` after updating so that NVIDIA ModelOpt is installed. NVFP4
 execution requires an NVIDIA Blackwell GPU (for example, DGX Spark or an RTX
-50-series card); it is not supported by H100 hardware. Use the `/resolve/`
-download URL shown above rather than the Hugging Face `/blob/` page URL from a
-browser. As with the other models, the checkpoint is fetched on the first
-request unless startup preloading is enabled.
+50-series card); it is not supported by H100 hardware. Diffusers expects the
+Hugging Face `/blob/main/` URL form shown above for a remote single-file model.
+For compatibility with existing configurations, the API also normalizes a
+`/resolve/main/` URL before passing it to Diffusers. As with the other models,
+the checkpoint is fetched on the first request unless startup preloading is
+enabled.
 
 ## User service
 
