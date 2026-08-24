@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from diffusers import AutoPipelineForText2Image, FluxPipeline, SanaSprintPipeline
+from diffusers import AutoPipelineForText2Image, FluxPipeline, SanaSprintPipeline, ZImagePipeline
 
 warnings.filterwarnings(
     "ignore",
@@ -192,6 +192,9 @@ def load_pipeline() -> None:
     elif PIPELINE_CLASS == "sana_sprint":
         pipeline_loader = SanaSprintPipeline
         resolved_pipeline_class = "sana_sprint"
+    elif PIPELINE_CLASS == "z_image":
+        pipeline_loader = ZImagePipeline
+        resolved_pipeline_class = "z_image"
     else:
         pipeline_loader = AutoPipelineForText2Image
         resolved_pipeline_class = "auto_t2i"
@@ -210,12 +213,18 @@ def load_pipeline() -> None:
 
     t0 = time.perf_counter()
 
-    pipe = pipeline_loader.from_pretrained(
-        MODEL_ID,
-        torch_dtype=TORCH_DTYPE,
-        token=hf_token,
-        local_files_only=local_files_only,
-    ).to(device)
+    load_kwargs = {
+        "torch_dtype": TORCH_DTYPE,
+        "token": hf_token,
+        "local_files_only": local_files_only,
+    }
+    if cache_dir:
+        load_kwargs["cache_dir"] = cache_dir
+
+    if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(".safetensors"):
+        pipe = pipeline_loader.from_single_file(MODEL_ID, **load_kwargs).to(device)
+    else:
+        pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
 
     pipe.set_progress_bar_config(disable=True)
 
