@@ -22,7 +22,6 @@ from diffusers import (
     FluxPipeline,
     SanaSprintPipeline,
     ZImagePipeline,
-    ZImageTransformer2DModel,
 )
 
 warnings.filterwarnings(
@@ -50,7 +49,6 @@ DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
-Z_IMAGE_BASE_MODEL_ID = os.getenv("Z_IMAGE_BASE_MODEL_ID", "Tongyi-MAI/Z-Image-Turbo")
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -168,14 +166,8 @@ def encode_image_b64(img, fmt: str = "PNG") -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def normalize_single_file_model_id(model_id: str) -> str:
-    """Return a Hugging Face URL in the form expected by Diffusers.
-
-    Diffusers' single-file URL parser strips ``blob/main`` before handing the
-    repository and filename to ``hf_hub_download``. A direct ``resolve/main``
-    URL is not stripped and would therefore duplicate that path segment.
-    """
-    return model_id.replace("/resolve/main/", "/blob/main/", 1)
+class UnsupportedModelError(RuntimeError):
+    """Raised when a configured checkpoint cannot be consumed by Diffusers."""
 
 
 # -----------------------------
@@ -239,20 +231,13 @@ def load_pipeline() -> None:
         load_kwargs["cache_dir"] = cache_dir
 
     if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(".safetensors"):
-        single_file_model_id = normalize_single_file_model_id(MODEL_ID)
-        transformer = ZImageTransformer2DModel.from_single_file(
-            single_file_model_id,
-            config=Z_IMAGE_BASE_MODEL_ID,
-            subfolder="transformer",
-            **load_kwargs,
+        raise UnsupportedModelError(
+            "Z-Image single-file checkpoints from Comfy-Org are ComfyUI-native and cannot be loaded "
+            "by Diffusers. Use MODEL_ID=Tongyi-MAI/Z-Image-Turbo, or run this NVFP4 checkpoint "
+            "through a ComfyUI backend."
         )
-        pipe = pipeline_loader.from_pretrained(
-            Z_IMAGE_BASE_MODEL_ID,
-            transformer=transformer,
-            **load_kwargs,
-        ).to(device)
-    else:
-        pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
+
+    pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
 
     pipe.set_progress_bar_config(disable=True)
 
@@ -331,7 +316,10 @@ async def ensure_pipe_loaded() -> None:
 
     if pipe is None:
         print("[INFO] loading pipeline after idle unload")
-        await asyncio.to_thread(load_pipeline)
+        try:
+            await asyncio.to_thread(load_pipeline)
+        except UnsupportedModelError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def idle_unload_loop() -> None:

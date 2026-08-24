@@ -22,8 +22,6 @@ torchaudio>=2.4.0
 torchvision>=0.19.0
 # Required by repositories that ship bitsandbytes-quantized 4-bit components.
 bitsandbytes>=0.46.1
-# Loads pre-quantized NVFP4 checkpoints through Diffusers on NVIDIA Blackwell.
-nvidia-modelopt[hf]>=0.33.1
 kernels
 python-multipart>=0.0.9
 aiofiles>=23.2.1

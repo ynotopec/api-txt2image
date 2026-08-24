@@ -64,34 +64,28 @@ DEFAULT_GUIDANCE=0.0
 The pipeline accepts the same image-generation endpoint and request shape as
 the other supported models.
 
-## Z-Image Turbo NVFP4
+## Z-Image Turbo
 
-The Comfy-Org single-file NVFP4 checkpoint can be loaded with Diffusers'
-explicit `ZImagePipeline` loader:
+Use the official Diffusers repository with its explicit `ZImagePipeline`
+loader:
 
 ```env
-MODEL_ID=https://huggingface.co/Comfy-Org/z_image_turbo/blob/main/split_files/diffusion_models/z_image_turbo_nvfp4.safetensors
+MODEL_ID=Tongyi-MAI/Z-Image-Turbo
 PIPELINE_CLASS=z_image
-Z_IMAGE_BASE_MODEL_ID=Tongyi-MAI/Z-Image-Turbo
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=9
 DEFAULT_GUIDANCE=0.0
 ```
 
-Run `./install.sh` after updating so that NVIDIA ModelOpt is installed. NVFP4
-execution requires an NVIDIA Blackwell GPU (for example, DGX Spark or an RTX
-50-series card); it is not supported by H100 hardware. Diffusers expects the
-Hugging Face `/blob/main/` URL form shown above for a remote single-file model.
-For compatibility with existing configurations, the API also normalizes a
-`/resolve/main/` URL before passing it to Diffusers. As with the other models,
-the checkpoint is fetched on the first request unless startup preloading is
-enabled.
-
-The Comfy-Org file contains only the quantized diffusion transformer, not the
-Qwen3 text encoder, tokenizer, VAE, or scheduler. The service therefore loads
-that file as `ZImageTransformer2DModel` and obtains the missing pipeline
-components from `Z_IMAGE_BASE_MODEL_ID`. Point this variable at a local copy of
-the base repository when using `LOCAL_FILES_ONLY=1`.
+The `Comfy-Org/z_image_turbo` files under `split_files/diffusion_models` are
+ComfyUI-native component checkpoints. In particular,
+`z_image_turbo_nvfp4.safetensors` uses a packed NVFP4 representation that
+Diffusers' Z-Image checkpoint converter cannot read; it is not a complete
+Diffusers pipeline and NVIDIA ModelOpt does not make that file format
+compatible. Run that exact checkpoint through ComfyUI instead. To avoid a long
+download followed by an internal conversion traceback, the API rejects a
+single-file `.safetensors` value with `PIPELINE_CLASS=z_image` and returns a
+clear HTTP 400 response.
 
 ## User service
 
