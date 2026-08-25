@@ -47,6 +47,25 @@ Run `./install.sh` again after updating an existing checkout so the new
 dependency is installed. The first generation request downloads and loads the
 model unless pipeline preloading is enabled.
 
+## FLUX.2 Klein 4B NVFP4
+
+The Black Forest Labs NVFP4 repository is a complete Diffusers pipeline and is
+supported through the explicit `Flux2KleinPipeline` loader. Use a recent
+Diffusers checkout (the project installs its current Git version) and configure:
+
+```env
+MODEL_ID=black-forest-labs/FLUX.2-klein-4b-nvfp4
+PIPELINE_CLASS=flux2_klein
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=4
+DEFAULT_GUIDANCE=1.0
+```
+
+NVFP4 execution requires a compatible NVIDIA GPU and CUDA/PyTorch runtime. The
+API request and base64 response formats are unchanged. `PIPELINE_CLASS=auto_t2i`
+also resolves this model with a sufficiently recent Diffusers checkout, but the
+explicit class makes the intended loader unambiguous.
+
 ## Sana Sprint 0.6B
 
 Sana Sprint declares `SanaSprintPipeline`, which Diffusers' generic

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from diffusers import (
     AutoPipelineForText2Image,
+    Flux2KleinPipeline,
     FluxPipeline,
     SanaSprintPipeline,
     ZImagePipeline,
@@ -195,7 +196,10 @@ def load_pipeline() -> None:
     local_files_only = os.getenv("LOCAL_FILES_ONLY", "0") == "1"
     cache_dir = os.getenv("HF_HOME") or os.getenv("HUGGINGFACE_HUB_CACHE")
 
-    if PIPELINE_CLASS == "flux":
+    if PIPELINE_CLASS == "flux2_klein":
+        pipeline_loader = Flux2KleinPipeline
+        resolved_pipeline_class = "flux2_klein"
+    elif PIPELINE_CLASS == "flux":
         pipeline_loader = FluxPipeline
         resolved_pipeline_class = "flux"
     elif PIPELINE_CLASS == "sana_sprint":
