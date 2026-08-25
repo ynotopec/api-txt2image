@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from diffusers import (
     AutoPipelineForText2Image,
+    Flux2KleinPipeline,
     FluxPipeline,
     SanaSprintPipeline,
     ZImagePipeline,
@@ -49,6 +50,7 @@ DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
+FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -195,7 +197,10 @@ def load_pipeline() -> None:
     local_files_only = os.getenv("LOCAL_FILES_ONLY", "0") == "1"
     cache_dir = os.getenv("HF_HOME") or os.getenv("HUGGINGFACE_HUB_CACHE")
 
-    if PIPELINE_CLASS == "flux":
+    if PIPELINE_CLASS == "flux2_klein":
+        pipeline_loader = Flux2KleinPipeline
+        resolved_pipeline_class = "flux2_klein"
+    elif PIPELINE_CLASS == "flux":
         pipeline_loader = FluxPipeline
         resolved_pipeline_class = "flux"
     elif PIPELINE_CLASS == "sana_sprint":
@@ -235,6 +240,17 @@ def load_pipeline() -> None:
             "Z-Image single-file checkpoints from Comfy-Org are ComfyUI-native and cannot be loaded "
             "by Diffusers. Use MODEL_ID=Tongyi-MAI/Z-Image-Turbo, or run this NVFP4 checkpoint "
             "through a ComfyUI backend."
+        )
+
+    if resolved_pipeline_class == "flux2_klein" and MODEL_ID.lower().endswith(
+        FLUX2_COMPONENT_SUFFIXES
+    ):
+        raise UnsupportedModelError(
+            f"'{MODEL_ID}' is a single-file quantized transformer checkpoint, not a complete "
+            "Diffusers pipeline. Diffusers' FLUX.2 single-file converter cannot load its "
+            "FP8/NVFP4 auxiliary tensors. Use MODEL_ID=black-forest-labs/FLUX.2-klein-4b "
+            "with PIPELINE_CLASS=flux2_klein, or run the quantized checkpoint through a "
+            "backend that explicitly supports its format."
         )
 
     pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)

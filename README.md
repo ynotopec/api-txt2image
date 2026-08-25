@@ -47,6 +47,26 @@ Run `./install.sh` again after updating an existing checkout so the new
 dependency is installed. The first generation request downloads and loads the
 model unless pipeline preloading is enabled.
 
+## FLUX.2 Klein 4B
+
+Use the complete Diffusers repository with the explicit Klein loader:
+
+```env
+MODEL_ID=black-forest-labs/FLUX.2-klein-4b
+PIPELINE_CLASS=flux2_klein
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=4
+DEFAULT_GUIDANCE=1.0
+```
+
+The `black-forest-labs/FLUX.2-klein-4b-fp8` and `-nvfp4` repositories are
+single-file quantized transformer checkpoints, not complete Diffusers
+pipelines. They contain auxiliary quantization tensors that Diffusers' FLUX.2
+single-file converter does not currently handle. The API rejects these model
+IDs with a clear HTTP 400 response instead of downloading the checkpoint and
+failing during conversion. Use the complete model above, or a backend that
+explicitly supports the quantized checkpoint format.
+
 ## Sana Sprint 0.6B
 
 Sana Sprint declares `SanaSprintPipeline`, which Diffusers' generic
