@@ -28,6 +28,22 @@ curl "$BASE_URL/v1/images/generations" \
 The response contains `data[].b64_json`. Health is available without a token at
 `GET /healthz`. Interactive API documentation is at `/docs`.
 
+## Safety checker
+
+The API uses the safety checker supplied by the selected Diffusers pipeline by
+default. It can be detached without switching to a separate CLI or maintaining
+a copy of upstream example code:
+
+```env
+SAFETY_CHECKER_ENABLED=0
+```
+
+Set it back to `1` to retain the model's checker. Not every pipeline ships one;
+in that case the setting cannot add a checker that the model does not provide.
+The requested setting and whether a checker is actually active are reported by
+`GET /healthz`. Only disable safety mechanisms where doing so is lawful and
+appropriate.
+
 ## Quantized Krea 2 Turbo
 
 The `OzzyGT/Krea_2_Turbo_nunchaku_lite_nvfp4` repository can be selected through

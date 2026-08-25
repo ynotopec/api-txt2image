@@ -39,6 +39,22 @@ warnings.filterwarnings(
 # -----------------------------
 # Config
 # -----------------------------
+def env_bool(name: str, default: bool = False) -> bool:
+    """Read a conventional boolean environment variable or fail fast."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{name} must be one of: 1/0, true/false, yes/no, on/off (got {raw!r})"
+    )
+
+
 MODEL_ID = os.getenv("MODEL_ID", "dataautogpt3/OpenDalle")
 
 DTYPE_STR = os.getenv("TORCH_DTYPE", "bf16").lower()
@@ -61,7 +77,11 @@ REQUIRE_MULTIPLE_OF = int(os.getenv("REQUIRE_MULTIPLE_OF", "8"))
 # <= 0 disables idle unload.
 IDLE_UNLOAD_SECONDS = int(os.getenv("IDLE_UNLOAD_SECONDS", "450"))
 IDLE_MONITOR_INTERVAL_SECONDS = float(os.getenv("IDLE_MONITOR_INTERVAL_SECONDS", "30"))
-LOAD_PIPELINE_ON_STARTUP = os.getenv("LOAD_PIPELINE_ON_STARTUP", "0") == "1"
+LOAD_PIPELINE_ON_STARTUP = env_bool("LOAD_PIPELINE_ON_STARTUP")
+
+# Diffusers pipelines do not all provide a safety checker. When one is present,
+# this switch controls whether it remains attached to the pipeline.
+SAFETY_CHECKER_ENABLED = env_bool("SAFETY_CHECKER_ENABLED", default=True)
 
 # -----------------------------
 # FastAPI
@@ -254,6 +274,15 @@ def load_pipeline() -> None:
         )
 
     pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
+
+    if not SAFETY_CHECKER_ENABLED:
+        if hasattr(pipe, "safety_checker"):
+            pipe.safety_checker = None
+            if hasattr(pipe, "register_to_config"):
+                pipe.register_to_config(requires_safety_checker=False)
+            print("[WARN] pipeline safety checker disabled by configuration")
+        else:
+            print("[INFO] configured model does not expose a pipeline safety checker")
 
     pipe.set_progress_bar_config(disable=True)
 
@@ -501,6 +530,10 @@ def healthz():
         "pipeline_loaded": pipe is not None,
         "idle_unload_seconds": IDLE_UNLOAD_SECONDS,
         "idle_monitor_interval_seconds": IDLE_MONITOR_INTERVAL_SECONDS,
+        "safety_checker_enabled": SAFETY_CHECKER_ENABLED,
+        "safety_checker_active": bool(
+            pipe is not None and getattr(pipe, "safety_checker", None) is not None
+        ),
     }
 
 
