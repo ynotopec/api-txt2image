@@ -17,7 +17,12 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from diffusers import AutoPipelineForText2Image, FluxPipeline, SanaSprintPipeline
+from diffusers import (
+    AutoPipelineForText2Image,
+    FluxPipeline,
+    SanaSprintPipeline,
+    ZImagePipeline,
+)
 
 warnings.filterwarnings(
     "ignore",
@@ -161,6 +166,10 @@ def encode_image_b64(img, fmt: str = "PNG") -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+class UnsupportedModelError(RuntimeError):
+    """Raised when a configured checkpoint cannot be consumed by Diffusers."""
+
+
 # -----------------------------
 # Pipeline lifecycle
 # -----------------------------
@@ -192,6 +201,9 @@ def load_pipeline() -> None:
     elif PIPELINE_CLASS == "sana_sprint":
         pipeline_loader = SanaSprintPipeline
         resolved_pipeline_class = "sana_sprint"
+    elif PIPELINE_CLASS == "z_image":
+        pipeline_loader = ZImagePipeline
+        resolved_pipeline_class = "z_image"
     else:
         pipeline_loader = AutoPipelineForText2Image
         resolved_pipeline_class = "auto_t2i"
@@ -210,12 +222,22 @@ def load_pipeline() -> None:
 
     t0 = time.perf_counter()
 
-    pipe = pipeline_loader.from_pretrained(
-        MODEL_ID,
-        torch_dtype=TORCH_DTYPE,
-        token=hf_token,
-        local_files_only=local_files_only,
-    ).to(device)
+    load_kwargs = {
+        "torch_dtype": TORCH_DTYPE,
+        "token": hf_token,
+        "local_files_only": local_files_only,
+    }
+    if cache_dir:
+        load_kwargs["cache_dir"] = cache_dir
+
+    if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(".safetensors"):
+        raise UnsupportedModelError(
+            "Z-Image single-file checkpoints from Comfy-Org are ComfyUI-native and cannot be loaded "
+            "by Diffusers. Use MODEL_ID=Tongyi-MAI/Z-Image-Turbo, or run this NVFP4 checkpoint "
+            "through a ComfyUI backend."
+        )
+
+    pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
 
     pipe.set_progress_bar_config(disable=True)
 
@@ -294,7 +316,10 @@ async def ensure_pipe_loaded() -> None:
 
     if pipe is None:
         print("[INFO] loading pipeline after idle unload")
-        await asyncio.to_thread(load_pipeline)
+        try:
+            await asyncio.to_thread(load_pipeline)
+        except UnsupportedModelError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def idle_unload_loop() -> None:

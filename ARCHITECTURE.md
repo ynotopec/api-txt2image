@@ -7,7 +7,7 @@ flowchart LR
     API[FastAPI app\napp.py]
     Auth[Bearer token validation\nOPENAI_API_KEY]
     Queue[GPU semaphore\nMAX_CONCURRENT]
-    Pipeline[Diffusers AutoPipelineForText2Image]
+    Pipeline[Diffusers text-to-image pipeline\nauto or explicit model loader]
     Idle[Idle monitor task\nIDLE_UNLOAD_SECONDS]
     GPU[(CUDA / CPU runtime)]
 

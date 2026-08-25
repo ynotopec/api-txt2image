@@ -64,6 +64,29 @@ DEFAULT_GUIDANCE=0.0
 The pipeline accepts the same image-generation endpoint and request shape as
 the other supported models.
 
+## Z-Image Turbo
+
+Use the official Diffusers repository with its explicit `ZImagePipeline`
+loader:
+
+```env
+MODEL_ID=Tongyi-MAI/Z-Image-Turbo
+PIPELINE_CLASS=z_image
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=9
+DEFAULT_GUIDANCE=0.0
+```
+
+The `Comfy-Org/z_image_turbo` files under `split_files/diffusion_models` are
+ComfyUI-native component checkpoints. In particular,
+`z_image_turbo_nvfp4.safetensors` uses a packed NVFP4 representation that
+Diffusers' Z-Image checkpoint converter cannot read; it is not a complete
+Diffusers pipeline and NVIDIA ModelOpt does not make that file format
+compatible. Run that exact checkpoint through ComfyUI instead. To avoid a long
+download followed by an internal conversion traceback, the API rejects a
+single-file `.safetensors` value with `PIPELINE_CLASS=z_image` and returns a
+clear HTTP 400 response.
+
 ## User service
 
 `run.sh` stays in the foreground and uses `exec`, so it works directly with
