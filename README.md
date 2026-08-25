@@ -49,22 +49,26 @@ model unless pipeline preloading is enabled.
 
 ## FLUX.2 Klein 4B NVFP4
 
-The Black Forest Labs NVFP4 repository is a complete Diffusers pipeline and is
-supported through the explicit `Flux2KleinPipeline` loader. Use a recent
-Diffusers checkout (the project installs its current Git version) and configure:
+The Black Forest Labs NVFP4 repository contains a quantized transformer
+component rather than a complete Diffusers pipeline (it has no
+`model_index.json`). The API loads that transformer with
+`Flux2Transformer2DModel`, then obtains the tokenizer, text encoder, VAE, and
+scheduler from the corresponding base model through `Flux2KleinPipeline`.
+Configure:
 
 ```env
 MODEL_ID=black-forest-labs/FLUX.2-klein-4b-nvfp4
+BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4b
 PIPELINE_CLASS=flux2_klein
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=4
 DEFAULT_GUIDANCE=1.0
 ```
 
-NVFP4 execution requires a compatible NVIDIA GPU and CUDA/PyTorch runtime. The
-API request and base64 response formats are unchanged. `PIPELINE_CLASS=auto_t2i`
-also resolves this model with a sufficiently recent Diffusers checkout, but the
-explicit class makes the intended loader unambiguous.
+`BASE_MODEL_ID` is optional for repositories whose name is the base model name
+plus `-nvfp4`; the API derives it by removing that suffix. Setting it explicitly
+is recommended. NVFP4 execution requires a compatible NVIDIA GPU and
+CUDA/PyTorch runtime. The API request and base64 response formats are unchanged.
 
 ## Sana Sprint 0.6B
 

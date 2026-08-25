@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from diffusers import (
     AutoPipelineForText2Image,
     Flux2KleinPipeline,
+    Flux2Transformer2DModel,
     FluxPipeline,
     SanaSprintPipeline,
     ZImagePipeline,
@@ -50,6 +51,7 @@ DEFAULT_STEPS = int(os.getenv("DEFAULT_STEPS", "20"))
 DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
+BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "").strip()
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -241,7 +243,23 @@ def load_pipeline() -> None:
             "through a ComfyUI backend."
         )
 
-    pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
+    if resolved_pipeline_class == "flux2_klein" and MODEL_ID.lower().endswith("-nvfp4"):
+        # The official NVFP4 repository only contains the quantized transformer,
+        # not the model_index.json and remaining components required by a pipeline.
+        # Load those components from the corresponding unquantized Klein repo.
+        base_model_id = BASE_MODEL_ID or MODEL_ID[: -len("-nvfp4")]
+        print(
+            f"[INFO] Loading FLUX.2 Klein NVFP4 transformer='{MODEL_ID}' "
+            f"with base_pipeline='{base_model_id}'"
+        )
+        transformer = Flux2Transformer2DModel.from_pretrained(MODEL_ID, **load_kwargs)
+        pipe = pipeline_loader.from_pretrained(
+            base_model_id,
+            transformer=transformer,
+            **load_kwargs,
+        ).to(device)
+    else:
+        pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
 
     pipe.set_progress_bar_config(disable=True)
 
