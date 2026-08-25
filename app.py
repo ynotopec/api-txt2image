@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
+from huggingface_hub import hf_hub_download, list_repo_files
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -53,6 +54,7 @@ MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "").strip()
 TRANSFORMER_SUBFOLDER = os.getenv("TRANSFORMER_SUBFOLDER", "transformer").strip()
+TRANSFORMER_FILENAME = os.getenv("TRANSFORMER_FILENAME", "").strip()
 FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
@@ -260,12 +262,42 @@ def load_pipeline() -> None:
             f"[INFO] Loading FLUX.2 Klein quantized transformer='{MODEL_ID}' "
             f"with base_pipeline='{base_model_id}'"
         )
-        transformer_load_kwargs = dict(load_kwargs)
-        if TRANSFORMER_SUBFOLDER:
-            transformer_load_kwargs["subfolder"] = TRANSFORMER_SUBFOLDER
-        transformer = Flux2Transformer2DModel.from_pretrained(
-            MODEL_ID,
-            **transformer_load_kwargs,
+        transformer_filename = TRANSFORMER_FILENAME
+        if not transformer_filename:
+            preferred_filename = f"{MODEL_ID.rsplit('/', 1)[-1]}.safetensors"
+            if local_files_only:
+                transformer_filename = preferred_filename
+            else:
+                repo_files = list_repo_files(MODEL_ID, token=hf_token)
+                root_checkpoints = [
+                    filename
+                    for filename in repo_files
+                    if "/" not in filename and filename.lower().endswith(".safetensors")
+                ]
+                if preferred_filename in root_checkpoints:
+                    transformer_filename = preferred_filename
+                elif len(root_checkpoints) == 1:
+                    transformer_filename = root_checkpoints[0]
+                else:
+                    raise UnsupportedModelError(
+                        f"Cannot select a root transformer checkpoint in '{MODEL_ID}'. "
+                        "Set TRANSFORMER_FILENAME explicitly."
+                    )
+        checkpoint_path = hf_hub_download(
+            repo_id=MODEL_ID,
+            filename=transformer_filename,
+            token=hf_token,
+            local_files_only=local_files_only,
+            cache_dir=cache_dir,
+        )
+        transformer = Flux2Transformer2DModel.from_single_file(
+            checkpoint_path,
+            config=base_model_id,
+            subfolder=TRANSFORMER_SUBFOLDER or None,
+            torch_dtype=TORCH_DTYPE,
+            token=hf_token,
+            local_files_only=local_files_only,
+            cache_dir=cache_dir,
         )
         pipe = pipeline_loader.from_pretrained(
             base_model_id,

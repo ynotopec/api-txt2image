@@ -68,12 +68,15 @@ DEFAULT_GUIDANCE=1.0
 
 `BASE_MODEL_ID` is optional for repositories whose name is the base model name
 plus `-nvfp4`; the API derives it by removing that suffix. Setting it explicitly
-is recommended. The quantized transformer's `config.json` and weights live in
-the repository's `transformer/` directory, so the loader supplies that subfolder
-instead of looking for `config.json` at the repository root. Override
-`TRANSFORMER_SUBFOLDER` only if a compatible repository uses a different
-layout. NVFP4 execution requires a compatible NVIDIA GPU and CUDA/PyTorch
-runtime. The API request and base64 response formats are unchanged.
+is recommended. These repositories publish a single transformer checkpoint at
+the repository root and do not publish a transformer `config.json`. The API
+downloads `TRANSFORMER_FILENAME`, then calls `from_single_file` using the base
+model's `transformer/` configuration. When the filename is omitted, the API
+discovers the sole root-level `.safetensors` checkpoint (preferring the
+repository name plus `.safetensors`). Set it explicitly when a repository has
+multiple root checkpoints or when running with `LOCAL_FILES_ONLY=1`. NVFP4
+execution requires a compatible NVIDIA GPU and CUDA/PyTorch runtime. The API
+request and base64 response formats are unchanged.
 
 ### FLUX.2 Klein 4B FP8
 
@@ -91,6 +94,7 @@ DEFAULT_GUIDANCE=1.0
 
 For both `-nvfp4` and `-fp8`, the API removes the quantization suffix when
 `BASE_MODEL_ID` is omitted and loads the quantized component from
+`TRANSFORMER_FILENAME` with the base model configuration in
 `TRANSFORMER_SUBFOLDER`.
 
 ## Sana Sprint 0.6B
