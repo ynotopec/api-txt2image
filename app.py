@@ -53,6 +53,7 @@ MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "").strip()
 TRANSFORMER_SUBFOLDER = os.getenv("TRANSFORMER_SUBFOLDER", "transformer").strip()
+FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -244,13 +245,19 @@ def load_pipeline() -> None:
             "through a ComfyUI backend."
         )
 
-    if resolved_pipeline_class == "flux2_klein" and MODEL_ID.lower().endswith("-nvfp4"):
-        # The official NVFP4 repository only contains the quantized transformer,
+    model_id_lower = MODEL_ID.lower()
+    component_suffix = next(
+        (suffix for suffix in FLUX2_COMPONENT_SUFFIXES if model_id_lower.endswith(suffix)),
+        None,
+    )
+
+    if resolved_pipeline_class == "flux2_klein" and component_suffix:
+        # The official quantized repository only contains the transformer,
         # not the model_index.json and remaining components required by a pipeline.
         # Load those components from the corresponding unquantized Klein repo.
-        base_model_id = BASE_MODEL_ID or MODEL_ID[: -len("-nvfp4")]
+        base_model_id = BASE_MODEL_ID or MODEL_ID[: -len(component_suffix)]
         print(
-            f"[INFO] Loading FLUX.2 Klein NVFP4 transformer='{MODEL_ID}' "
+            f"[INFO] Loading FLUX.2 Klein quantized transformer='{MODEL_ID}' "
             f"with base_pipeline='{base_model_id}'"
         )
         transformer_load_kwargs = dict(load_kwargs)

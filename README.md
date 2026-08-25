@@ -75,6 +75,24 @@ instead of looking for `config.json` at the repository root. Override
 layout. NVFP4 execution requires a compatible NVIDIA GPU and CUDA/PyTorch
 runtime. The API request and base64 response formats are unchanged.
 
+### FLUX.2 Klein 4B FP8
+
+The FP8 repository uses the same transformer-component layout and loading path:
+
+```env
+MODEL_ID=black-forest-labs/FLUX.2-klein-4b-fp8
+BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4b
+TRANSFORMER_SUBFOLDER=transformer
+PIPELINE_CLASS=flux2_klein
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=4
+DEFAULT_GUIDANCE=1.0
+```
+
+For both `-nvfp4` and `-fp8`, the API removes the quantization suffix when
+`BASE_MODEL_ID` is omitted and loads the quantized component from
+`TRANSFORMER_SUBFOLDER`.
+
 ## Sana Sprint 0.6B
 
 Sana Sprint declares `SanaSprintPipeline`, which Diffusers' generic
