@@ -47,55 +47,25 @@ Run `./install.sh` again after updating an existing checkout so the new
 dependency is installed. The first generation request downloads and loads the
 model unless pipeline preloading is enabled.
 
-## FLUX.2 Klein 4B NVFP4
+## FLUX.2 Klein 4B
 
-The Black Forest Labs NVFP4 repository contains a quantized transformer
-component rather than a complete Diffusers pipeline (it has no
-`model_index.json`). The API loads that transformer with
-`Flux2Transformer2DModel`, then obtains the tokenizer, text encoder, VAE, and
-scheduler from the corresponding base model through `Flux2KleinPipeline`.
-Configure:
+Use the complete Diffusers repository with the explicit Klein loader:
 
 ```env
-MODEL_ID=black-forest-labs/FLUX.2-klein-4b-nvfp4
-BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4b
-TRANSFORMER_SUBFOLDER=transformer
+MODEL_ID=black-forest-labs/FLUX.2-klein-4b
 PIPELINE_CLASS=flux2_klein
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=4
 DEFAULT_GUIDANCE=1.0
 ```
 
-`BASE_MODEL_ID` is optional for repositories whose name is the base model name
-plus `-nvfp4`; the API derives it by removing that suffix. Setting it explicitly
-is recommended. These repositories publish a single transformer checkpoint at
-the repository root and do not publish a transformer `config.json`. The API
-downloads `TRANSFORMER_FILENAME`, then calls `from_single_file` using the base
-model's `transformer/` configuration. When the filename is omitted, the API
-discovers the sole root-level `.safetensors` checkpoint (preferring the
-repository name plus `.safetensors`). Set it explicitly when a repository has
-multiple root checkpoints or when running with `LOCAL_FILES_ONLY=1`. NVFP4
-execution requires a compatible NVIDIA GPU and CUDA/PyTorch runtime. The API
-request and base64 response formats are unchanged.
-
-### FLUX.2 Klein 4B FP8
-
-The FP8 repository uses the same transformer-component layout and loading path:
-
-```env
-MODEL_ID=black-forest-labs/FLUX.2-klein-4b-fp8
-BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4b
-TRANSFORMER_SUBFOLDER=transformer
-PIPELINE_CLASS=flux2_klein
-TORCH_DTYPE=bf16
-DEFAULT_STEPS=4
-DEFAULT_GUIDANCE=1.0
-```
-
-For both `-nvfp4` and `-fp8`, the API removes the quantization suffix when
-`BASE_MODEL_ID` is omitted and loads the quantized component from
-`TRANSFORMER_FILENAME` with the base model configuration in
-`TRANSFORMER_SUBFOLDER`.
+The `black-forest-labs/FLUX.2-klein-4b-fp8` and `-nvfp4` repositories are
+single-file quantized transformer checkpoints, not complete Diffusers
+pipelines. They contain auxiliary quantization tensors that Diffusers' FLUX.2
+single-file converter does not currently handle. The API rejects these model
+IDs with a clear HTTP 400 response instead of downloading the checkpoint and
+failing during conversion. Use the complete model above, or a backend that
+explicitly supports the quantized checkpoint format.
 
 ## Sana Sprint 0.6B
 
