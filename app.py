@@ -52,6 +52,7 @@ DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "").strip()
+TRANSFORMER_SUBFOLDER = os.getenv("TRANSFORMER_SUBFOLDER", "transformer").strip()
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -252,7 +253,13 @@ def load_pipeline() -> None:
             f"[INFO] Loading FLUX.2 Klein NVFP4 transformer='{MODEL_ID}' "
             f"with base_pipeline='{base_model_id}'"
         )
-        transformer = Flux2Transformer2DModel.from_pretrained(MODEL_ID, **load_kwargs)
+        transformer_load_kwargs = dict(load_kwargs)
+        if TRANSFORMER_SUBFOLDER:
+            transformer_load_kwargs["subfolder"] = TRANSFORMER_SUBFOLDER
+        transformer = Flux2Transformer2DModel.from_pretrained(
+            MODEL_ID,
+            **transformer_load_kwargs,
+        )
         pipe = pipeline_loader.from_pretrained(
             base_model_id,
             transformer=transformer,

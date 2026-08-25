@@ -59,6 +59,7 @@ Configure:
 ```env
 MODEL_ID=black-forest-labs/FLUX.2-klein-4b-nvfp4
 BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4b
+TRANSFORMER_SUBFOLDER=transformer
 PIPELINE_CLASS=flux2_klein
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=4
@@ -67,8 +68,12 @@ DEFAULT_GUIDANCE=1.0
 
 `BASE_MODEL_ID` is optional for repositories whose name is the base model name
 plus `-nvfp4`; the API derives it by removing that suffix. Setting it explicitly
-is recommended. NVFP4 execution requires a compatible NVIDIA GPU and
-CUDA/PyTorch runtime. The API request and base64 response formats are unchanged.
+is recommended. The quantized transformer's `config.json` and weights live in
+the repository's `transformer/` directory, so the loader supplies that subfolder
+instead of looking for `config.json` at the repository root. Override
+`TRANSFORMER_SUBFOLDER` only if a compatible repository uses a different
+layout. NVFP4 execution requires a compatible NVIDIA GPU and CUDA/PyTorch
+runtime. The API request and base64 response formats are unchanged.
 
 ## Sana Sprint 0.6B
 
