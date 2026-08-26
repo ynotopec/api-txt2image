@@ -56,6 +56,9 @@ FLUX2_TEXT_ENCODER_SUFFIXES = ("-text-encoder", "_text_encoder")
 FLUX2_BASE_MODEL_ID = os.getenv(
     "FLUX2_BASE_MODEL_ID", "black-forest-labs/FLUX.2-klein-base-4B"
 )
+FLUX2_TEXT_ENCODER_SUBFOLDER = os.getenv(
+    "FLUX2_TEXT_ENCODER_SUBFOLDER", "text_encoder"
+).strip()
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -281,11 +284,10 @@ def load_pipeline() -> None:
             subfolder="text_encoder",
             **config_kwargs,
         )
-        text_encoder = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID,
-            config=text_encoder_config,
-            **load_kwargs,
-        )
+        text_encoder_kwargs = {**load_kwargs, "config": text_encoder_config}
+        if FLUX2_TEXT_ENCODER_SUBFOLDER:
+            text_encoder_kwargs["subfolder"] = FLUX2_TEXT_ENCODER_SUBFOLDER
+        text_encoder = AutoModelForCausalLM.from_pretrained(MODEL_ID, **text_encoder_kwargs)
         load_kwargs["text_encoder"] = text_encoder
 
     pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)

@@ -11,11 +11,13 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
             app.MODEL_ID,
             app.PIPELINE_CLASS,
             app.FLUX2_BASE_MODEL_ID,
+            app.FLUX2_TEXT_ENCODER_SUBFOLDER,
         )
         app.pipe = None
         app.MODEL_ID = "ponpoke/flux2-klein-4b-uncensored-text-encoder"
         app.PIPELINE_CLASS = "flux2_klein"
         app.FLUX2_BASE_MODEL_ID = "black-forest-labs/FLUX.2-klein-base-4B"
+        app.FLUX2_TEXT_ENCODER_SUBFOLDER = "text_encoder"
 
     def tearDown(self):
         (
@@ -23,6 +25,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
             app.MODEL_ID,
             app.PIPELINE_CLASS,
             app.FLUX2_BASE_MODEL_ID,
+            app.FLUX2_TEXT_ENCODER_SUBFOLDER,
         ) = self.original_values
 
     def test_uses_base_encoder_config_with_replacement_weights(self):
@@ -56,6 +59,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         encoder_args, encoder_kwargs = load_encoder.call_args
         self.assertEqual(encoder_args, (app.MODEL_ID,))
         self.assertIs(encoder_kwargs["config"], encoder_config)
+        self.assertEqual(encoder_kwargs["subfolder"], "text_encoder")
 
         load_pipeline.assert_called_once()
         pipeline_args, pipeline_kwargs = load_pipeline.call_args

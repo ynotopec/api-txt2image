@@ -74,6 +74,7 @@ example:
 MODEL_ID=ponpoke/flux2-klein-4b-uncensored-text-encoder
 PIPELINE_CLASS=flux2_klein
 FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-base-4B
+FLUX2_TEXT_ENCODER_SUBFOLDER=text_encoder
 TORCH_DTYPE=bf16
 DEFAULT_STEPS=50
 DEFAULT_GUIDANCE=4.0
@@ -85,6 +86,12 @@ configuration, tokenizer, transformer, VAE, and scheduler from
 `FLUX2_BASE_MODEL_ID`. This also supports component repositories whose minimal
 `config.json` omits Transformers' `model_type` field. The base defaults to the
 official, non-distilled 4B Klein base repository.
+
+The replacement repository stores its Transformers checkpoint under its
+`text_encoder/` directory rather than at the repository root. The subfolder
+setting therefore defaults to `text_encoder`; set
+`FLUX2_TEXT_ENCODER_SUBFOLDER=` only for a replacement repository that stores
+`model.safetensors` at its root.
 
 The base checkpoint is not the four-step distilled checkpoint used in the
 first example, so start with 50 steps and guidance 4.0 rather than the
