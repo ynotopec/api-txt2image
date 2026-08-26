@@ -67,6 +67,43 @@ IDs with a clear HTTP 400 response instead of downloading the checkpoint and
 failing during conversion. Use the complete model above, or a backend that
 explicitly supports the quantized checkpoint format.
 
+A replacement text-encoder repository can also be selected directly. For
+example:
+
+```env
+MODEL_ID=ponpoke/flux2-klein-4b-uncensored-text-encoder
+PIPELINE_CLASS=flux2_klein
+FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-base-4B
+FLUX2_TEXT_ENCODER_SUBFOLDER=text_encoder
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=50
+DEFAULT_GUIDANCE=4.0
+```
+
+Because the component repository has no pipeline-level `model_index.json`, the
+service loads its weights as the `text_encoder` and obtains the encoder
+configuration, tokenizer, transformer, VAE, and scheduler from
+`FLUX2_BASE_MODEL_ID`. This also supports component repositories whose minimal
+`config.json` omits Transformers' `model_type` field. The base defaults to the
+official, non-distilled 4B Klein base repository.
+
+The replacement repository stores its Transformers checkpoint under its
+`text_encoder/` directory rather than at the repository root. Its checkpoint
+also uses a nonstandard filename. The loader first checks the configured
+subfolder and, if no standard `model.safetensors` is present, discovers the
+repository's single safetensors checkpoint and exposes it to Transformers under
+the conventional filename without copying it. The subfolder setting defaults
+to `text_encoder` and normally does not need to be changed.
+
+The service also builds the encoder's generation configuration directly from
+the base model configuration. This prevents recent Transformers versions from
+trying to resolve a nonexistent `generation_config.json` in the temporary
+checkpoint view.
+
+The base checkpoint is not the four-step distilled checkpoint used in the
+first example, so start with 50 steps and guidance 4.0 rather than the
+distilled model's 4 steps and guidance 1.0.
+
 ## Sana Sprint 0.6B
 
 Sana Sprint declares `SanaSprintPipeline`, which Diffusers' generic

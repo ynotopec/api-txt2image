@@ -9,6 +9,8 @@ import warnings
 import inspect
 import gc
 import ctypes
+import tempfile
+from pathlib import Path
 from typing import Optional, Literal, List, Tuple, Set
 
 import torch
@@ -16,6 +18,8 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
+from huggingface_hub import snapshot_download
+from transformers import AutoConfig, AutoModelForCausalLM, GenerationConfig
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -51,6 +55,13 @@ DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
+FLUX2_TEXT_ENCODER_SUFFIXES = ("-text-encoder", "_text_encoder")
+FLUX2_BASE_MODEL_ID = os.getenv(
+    "FLUX2_BASE_MODEL_ID", "black-forest-labs/FLUX.2-klein-base-4B"
+)
+FLUX2_TEXT_ENCODER_SUBFOLDER = os.getenv(
+    "FLUX2_TEXT_ENCODER_SUBFOLDER", "text_encoder"
+).strip()
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -172,6 +183,61 @@ class UnsupportedModelError(RuntimeError):
     """Raised when a configured checkpoint cannot be consumed by Diffusers."""
 
 
+def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
+    """Load a component encoder, including repos with a custom checkpoint filename."""
+    generation_config = GenerationConfig.from_model_config(config)
+    encoder_kwargs = {
+        **load_kwargs,
+        "config": config,
+        "generation_config": generation_config,
+    }
+    if FLUX2_TEXT_ENCODER_SUBFOLDER:
+        encoder_kwargs["subfolder"] = FLUX2_TEXT_ENCODER_SUBFOLDER
+
+    try:
+        return AutoModelForCausalLM.from_pretrained(model_id, **encoder_kwargs)
+    except OSError as exc:
+        if "pytorch_model.bin or model.safetensors" not in str(exc):
+            raise
+
+    snapshot_kwargs = {
+        key: load_kwargs[key]
+        for key in ("token", "local_files_only", "cache_dir")
+        if key in load_kwargs
+    }
+    snapshot_path = Path(
+        snapshot_download(
+            repo_id=model_id,
+            allow_patterns=["*.safetensors", "**/*.safetensors"],
+            **snapshot_kwargs,
+        )
+    )
+    checkpoints = sorted(snapshot_path.rglob("*.safetensors"))
+    if len(checkpoints) != 1:
+        raise UnsupportedModelError(
+            f"'{model_id}' has no standard Transformers checkpoint name and contains "
+            f"{len(checkpoints)} safetensors files; expected exactly one."
+        )
+
+    # Transformers has no filename argument for from_pretrained. Present the
+    # repository's single, custom-named checkpoint under its conventional name
+    # without copying the (potentially multi-GB) file.
+    with tempfile.TemporaryDirectory(prefix="flux2-text-encoder-") as temp_dir:
+        Path(temp_dir, "model.safetensors").symlink_to(checkpoints[0])
+        fallback_kwargs = {
+            key: value
+            for key, value in load_kwargs.items()
+            if key not in ("token", "local_files_only", "cache_dir")
+        }
+        return AutoModelForCausalLM.from_pretrained(
+            temp_dir,
+            config=config,
+            generation_config=generation_config,
+            local_files_only=True,
+            **fallback_kwargs,
+        )
+
+
 # -----------------------------
 # Pipeline lifecycle
 # -----------------------------
@@ -253,7 +319,33 @@ def load_pipeline() -> None:
             "backend that explicitly supports its format."
         )
 
-    pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
+    pipeline_model_id = MODEL_ID
+    if resolved_pipeline_class == "flux2_klein" and MODEL_ID.lower().endswith(
+        FLUX2_TEXT_ENCODER_SUFFIXES
+    ):
+        pipeline_model_id = FLUX2_BASE_MODEL_ID
+        print(
+            f"[INFO] Loading FLUX.2 text_encoder='{MODEL_ID}' "
+            f"with base_pipeline='{pipeline_model_id}'"
+        )
+        # Component-only encoder repositories may ship weights and a minimal
+        # config.json without the `model_type` required by Transformers' auto
+        # classes. Use the canonical text-encoder config from the complete
+        # pipeline while still loading the replacement repository's weights.
+        config_kwargs = {
+            key: load_kwargs[key]
+            for key in ("token", "local_files_only", "cache_dir")
+            if key in load_kwargs
+        }
+        text_encoder_config = AutoConfig.from_pretrained(
+            pipeline_model_id,
+            subfolder="text_encoder",
+            **config_kwargs,
+        )
+        text_encoder = load_text_encoder_weights(MODEL_ID, text_encoder_config, load_kwargs)
+        load_kwargs["text_encoder"] = text_encoder
+
+    pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)
 
     pipe.set_progress_bar_config(disable=True)
 
