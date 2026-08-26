@@ -51,6 +51,7 @@ DEFAULT_GUIDANCE = float(os.getenv("DEFAULT_GUIDANCE", "7.0"))
 MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
+FLUX2_TEXT_ENCODER_SUFFIXES = ("-text-encoder", "_text_encoder")
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -251,6 +252,17 @@ def load_pipeline() -> None:
             "FP8/NVFP4 auxiliary tensors. Use MODEL_ID=black-forest-labs/FLUX.2-klein-4b "
             "with PIPELINE_CLASS=flux2_klein, or run the quantized checkpoint through a "
             "backend that explicitly supports its format."
+        )
+
+    if resolved_pipeline_class == "flux2_klein" and MODEL_ID.lower().endswith(
+        FLUX2_TEXT_ENCODER_SUFFIXES
+    ):
+        raise UnsupportedModelError(
+            f"'{MODEL_ID}' is a text-encoder component repository, not a complete Diffusers "
+            "pipeline, so it does not contain model_index.json. Set "
+            "MODEL_ID=black-forest-labs/FLUX.2-klein-4b with "
+            "PIPELINE_CLASS=flux2_klein. A replacement text encoder cannot be selected by "
+            "using its repository as MODEL_ID."
         )
 
     pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)

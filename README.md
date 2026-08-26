@@ -67,6 +67,14 @@ IDs with a clear HTTP 400 response instead of downloading the checkpoint and
 failing during conversion. Use the complete model above, or a backend that
 explicitly supports the quantized checkpoint format.
 
+Likewise, a repository whose name ends in `-text-encoder` (for example,
+`ponpoke/flux2-klein-4b-uncensored-text-encoder`) contains only a replacement
+text-encoder component. It has no pipeline-level `model_index.json` and cannot
+be used as `MODEL_ID`. The API detects this configuration and returns an
+actionable HTTP 400 response instead of exposing Hugging Face's 404 traceback.
+Use the complete `black-forest-labs/FLUX.2-klein-4b` repository as `MODEL_ID`;
+custom replacement text encoders are not currently supported by this service.
+
 ## Sana Sprint 0.6B
 
 Sana Sprint declares `SanaSprintPipeline`, which Diffusers' generic
