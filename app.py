@@ -9,6 +9,8 @@ import warnings
 import inspect
 import gc
 import ctypes
+import tempfile
+from pathlib import Path
 from typing import Optional, Literal, List, Tuple, Set
 
 import torch
@@ -16,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
+from huggingface_hub import snapshot_download
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from diffusers import (
@@ -180,6 +183,55 @@ class UnsupportedModelError(RuntimeError):
     """Raised when a configured checkpoint cannot be consumed by Diffusers."""
 
 
+def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
+    """Load a component encoder, including repos with a custom checkpoint filename."""
+    encoder_kwargs = {**load_kwargs, "config": config}
+    if FLUX2_TEXT_ENCODER_SUBFOLDER:
+        encoder_kwargs["subfolder"] = FLUX2_TEXT_ENCODER_SUBFOLDER
+
+    try:
+        return AutoModelForCausalLM.from_pretrained(model_id, **encoder_kwargs)
+    except OSError as exc:
+        if "pytorch_model.bin or model.safetensors" not in str(exc):
+            raise
+
+    snapshot_kwargs = {
+        key: load_kwargs[key]
+        for key in ("token", "local_files_only", "cache_dir")
+        if key in load_kwargs
+    }
+    snapshot_path = Path(
+        snapshot_download(
+            repo_id=model_id,
+            allow_patterns=["*.safetensors", "**/*.safetensors"],
+            **snapshot_kwargs,
+        )
+    )
+    checkpoints = sorted(snapshot_path.rglob("*.safetensors"))
+    if len(checkpoints) != 1:
+        raise UnsupportedModelError(
+            f"'{model_id}' has no standard Transformers checkpoint name and contains "
+            f"{len(checkpoints)} safetensors files; expected exactly one."
+        )
+
+    # Transformers has no filename argument for from_pretrained. Present the
+    # repository's single, custom-named checkpoint under its conventional name
+    # without copying the (potentially multi-GB) file.
+    with tempfile.TemporaryDirectory(prefix="flux2-text-encoder-") as temp_dir:
+        Path(temp_dir, "model.safetensors").symlink_to(checkpoints[0])
+        fallback_kwargs = {
+            key: value
+            for key, value in load_kwargs.items()
+            if key not in ("token", "local_files_only", "cache_dir")
+        }
+        return AutoModelForCausalLM.from_pretrained(
+            temp_dir,
+            config=config,
+            local_files_only=True,
+            **fallback_kwargs,
+        )
+
+
 # -----------------------------
 # Pipeline lifecycle
 # -----------------------------
@@ -284,10 +336,7 @@ def load_pipeline() -> None:
             subfolder="text_encoder",
             **config_kwargs,
         )
-        text_encoder_kwargs = {**load_kwargs, "config": text_encoder_config}
-        if FLUX2_TEXT_ENCODER_SUBFOLDER:
-            text_encoder_kwargs["subfolder"] = FLUX2_TEXT_ENCODER_SUBFOLDER
-        text_encoder = AutoModelForCausalLM.from_pretrained(MODEL_ID, **text_encoder_kwargs)
+        text_encoder = load_text_encoder_weights(MODEL_ID, text_encoder_config, load_kwargs)
         load_kwargs["text_encoder"] = text_encoder
 
     pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)

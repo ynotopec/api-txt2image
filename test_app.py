@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import app
@@ -65,6 +67,45 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         pipeline_args, pipeline_kwargs = load_pipeline.call_args
         self.assertEqual(pipeline_args, (app.FLUX2_BASE_MODEL_ID,))
         self.assertIs(pipeline_kwargs["text_encoder"], text_encoder)
+
+    def test_custom_named_safetensors_checkpoint_is_loaded(self):
+        encoder_config = object()
+        text_encoder = object()
+
+        with tempfile.TemporaryDirectory() as snapshot_dir:
+            checkpoint = Path(snapshot_dir, "uncensored-text-encoder.safetensors")
+            checkpoint.touch()
+            missing_standard_file = OSError(
+                f"{app.MODEL_ID} does not appear to have a file named "
+                "pytorch_model.bin or model.safetensors."
+            )
+
+            with (
+                patch.object(
+                    app.AutoModelForCausalLM,
+                    "from_pretrained",
+                    side_effect=[missing_standard_file, text_encoder],
+                ) as load_encoder,
+                patch.object(
+                    app,
+                    "snapshot_download",
+                    return_value=snapshot_dir,
+                ) as download_snapshot,
+            ):
+                result = app.load_text_encoder_weights(
+                    app.MODEL_ID,
+                    encoder_config,
+                    {"torch_dtype": app.TORCH_DTYPE, "local_files_only": False},
+                )
+
+        self.assertIs(result, text_encoder)
+        download_snapshot.assert_called_once()
+        self.assertEqual(load_encoder.call_count, 2)
+        fallback_args, fallback_kwargs = load_encoder.call_args
+        self.assertTrue(fallback_args[0].startswith("/tmp/flux2-text-encoder-"))
+        self.assertIs(fallback_kwargs["config"], encoder_config)
+        self.assertTrue(fallback_kwargs["local_files_only"])
+        self.assertNotIn("subfolder", fallback_kwargs)
 
 
 if __name__ == "__main__":

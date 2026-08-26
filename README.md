@@ -88,10 +88,12 @@ configuration, tokenizer, transformer, VAE, and scheduler from
 official, non-distilled 4B Klein base repository.
 
 The replacement repository stores its Transformers checkpoint under its
-`text_encoder/` directory rather than at the repository root. The subfolder
-setting therefore defaults to `text_encoder`; set
-`FLUX2_TEXT_ENCODER_SUBFOLDER=` only for a replacement repository that stores
-`model.safetensors` at its root.
+`text_encoder/` directory rather than at the repository root. Its checkpoint
+also uses a nonstandard filename. The loader first checks the configured
+subfolder and, if no standard `model.safetensors` is present, discovers the
+repository's single safetensors checkpoint and exposes it to Transformers under
+the conventional filename without copying it. The subfolder setting defaults
+to `text_encoder` and normally does not need to be changed.
 
 The base checkpoint is not the four-step distilled checkpoint used in the
 first example, so start with 50 steps and guidance 4.0 rather than the
