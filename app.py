@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
+from transformers import AutoModelForCausalLM
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -52,6 +53,9 @@ MAX_SEQUENCE_LENGTH = int(os.getenv("MAX_SEQUENCE_LENGTH", "512"))
 PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
 FLUX2_TEXT_ENCODER_SUFFIXES = ("-text-encoder", "_text_encoder")
+FLUX2_BASE_MODEL_ID = os.getenv(
+    "FLUX2_BASE_MODEL_ID", "black-forest-labs/FLUX.2-klein-4b"
+)
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -254,18 +258,19 @@ def load_pipeline() -> None:
             "backend that explicitly supports its format."
         )
 
+    pipeline_model_id = MODEL_ID
     if resolved_pipeline_class == "flux2_klein" and MODEL_ID.lower().endswith(
         FLUX2_TEXT_ENCODER_SUFFIXES
     ):
-        raise UnsupportedModelError(
-            f"'{MODEL_ID}' is a text-encoder component repository, not a complete Diffusers "
-            "pipeline, so it does not contain model_index.json. Set "
-            "MODEL_ID=black-forest-labs/FLUX.2-klein-4b with "
-            "PIPELINE_CLASS=flux2_klein. A replacement text encoder cannot be selected by "
-            "using its repository as MODEL_ID."
+        pipeline_model_id = FLUX2_BASE_MODEL_ID
+        print(
+            f"[INFO] Loading FLUX.2 text_encoder='{MODEL_ID}' "
+            f"with base_pipeline='{pipeline_model_id}'"
         )
+        text_encoder = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
+        load_kwargs["text_encoder"] = text_encoder
 
-    pipe = pipeline_loader.from_pretrained(MODEL_ID, **load_kwargs).to(device)
+    pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)
 
     pipe.set_progress_bar_config(disable=True)
 
