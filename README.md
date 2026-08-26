@@ -95,6 +95,11 @@ repository's single safetensors checkpoint and exposes it to Transformers under
 the conventional filename without copying it. The subfolder setting defaults
 to `text_encoder` and normally does not need to be changed.
 
+The service also builds the encoder's generation configuration directly from
+the base model configuration. This prevents recent Transformers versions from
+trying to resolve a nonexistent `generation_config.json` in the temporary
+checkpoint view.
+
 The base checkpoint is not the four-step distilled checkpoint used in the
 first example, so start with 50 steps and guidance 4.0 rather than the
 distilled model's 4 steps and guidance 1.0.

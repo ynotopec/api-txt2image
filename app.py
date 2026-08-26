@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from huggingface_hub import snapshot_download
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, GenerationConfig
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -185,7 +185,12 @@ class UnsupportedModelError(RuntimeError):
 
 def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
     """Load a component encoder, including repos with a custom checkpoint filename."""
-    encoder_kwargs = {**load_kwargs, "config": config}
+    generation_config = GenerationConfig.from_model_config(config)
+    encoder_kwargs = {
+        **load_kwargs,
+        "config": config,
+        "generation_config": generation_config,
+    }
     if FLUX2_TEXT_ENCODER_SUBFOLDER:
         encoder_kwargs["subfolder"] = FLUX2_TEXT_ENCODER_SUBFOLDER
 
@@ -227,6 +232,7 @@ def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
         return AutoModelForCausalLM.from_pretrained(
             temp_dir,
             config=config,
+            generation_config=generation_config,
             local_files_only=True,
             **fallback_kwargs,
         )

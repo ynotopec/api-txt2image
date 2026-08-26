@@ -32,6 +32,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
 
     def test_uses_base_encoder_config_with_replacement_weights(self):
         encoder_config = object()
+        generation_config = object()
         text_encoder = object()
         pipeline = MagicMock()
         pipeline.to.return_value = pipeline
@@ -40,6 +41,11 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
             patch.object(
                 app.AutoConfig, "from_pretrained", return_value=encoder_config
             ) as load_config,
+            patch.object(
+                app.GenerationConfig,
+                "from_model_config",
+                return_value=generation_config,
+            ) as make_generation_config,
             patch.object(
                 app.AutoModelForCausalLM,
                 "from_pretrained",
@@ -61,7 +67,9 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         encoder_args, encoder_kwargs = load_encoder.call_args
         self.assertEqual(encoder_args, (app.MODEL_ID,))
         self.assertIs(encoder_kwargs["config"], encoder_config)
+        self.assertIs(encoder_kwargs["generation_config"], generation_config)
         self.assertEqual(encoder_kwargs["subfolder"], "text_encoder")
+        make_generation_config.assert_called_once_with(encoder_config)
 
         load_pipeline.assert_called_once()
         pipeline_args, pipeline_kwargs = load_pipeline.call_args
@@ -70,6 +78,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
 
     def test_custom_named_safetensors_checkpoint_is_loaded(self):
         encoder_config = object()
+        generation_config = object()
         text_encoder = object()
 
         with tempfile.TemporaryDirectory() as snapshot_dir:
@@ -81,6 +90,11 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
             )
 
             with (
+                patch.object(
+                    app.GenerationConfig,
+                    "from_model_config",
+                    return_value=generation_config,
+                ) as make_generation_config,
                 patch.object(
                     app.AutoModelForCausalLM,
                     "from_pretrained",
@@ -99,11 +113,13 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
                 )
 
         self.assertIs(result, text_encoder)
+        make_generation_config.assert_called_once_with(encoder_config)
         download_snapshot.assert_called_once()
         self.assertEqual(load_encoder.call_count, 2)
         fallback_args, fallback_kwargs = load_encoder.call_args
         self.assertTrue(fallback_args[0].startswith("/tmp/flux2-text-encoder-"))
         self.assertIs(fallback_kwargs["config"], encoder_config)
+        self.assertIs(fallback_kwargs["generation_config"], generation_config)
         self.assertTrue(fallback_kwargs["local_files_only"])
         self.assertNotIn("subfolder", fallback_kwargs)
 
