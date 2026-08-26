@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-from transformers import AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM
 
 from diffusers import (
     AutoPipelineForText2Image,
@@ -267,7 +267,25 @@ def load_pipeline() -> None:
             f"[INFO] Loading FLUX.2 text_encoder='{MODEL_ID}' "
             f"with base_pipeline='{pipeline_model_id}'"
         )
-        text_encoder = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
+        # Component-only encoder repositories may ship weights and a minimal
+        # config.json without the `model_type` required by Transformers' auto
+        # classes. Use the canonical text-encoder config from the complete
+        # pipeline while still loading the replacement repository's weights.
+        config_kwargs = {
+            key: load_kwargs[key]
+            for key in ("token", "local_files_only", "cache_dir")
+            if key in load_kwargs
+        }
+        text_encoder_config = AutoConfig.from_pretrained(
+            pipeline_model_id,
+            subfolder="text_encoder",
+            **config_kwargs,
+        )
+        text_encoder = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID,
+            config=text_encoder_config,
+            **load_kwargs,
+        )
         load_kwargs["text_encoder"] = text_encoder
 
     pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)
