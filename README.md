@@ -73,7 +73,10 @@ example:
 ```env
 MODEL_ID=ponpoke/flux2-klein-4b-uncensored-text-encoder
 PIPELINE_CLASS=flux2_klein
-FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4b
+FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-base-4B
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=50
+DEFAULT_GUIDANCE=4.0
 ```
 
 Because the component repository has no pipeline-level `model_index.json`, the
@@ -81,7 +84,11 @@ service loads its weights as the `text_encoder` and obtains the encoder
 configuration, tokenizer, transformer, VAE, and scheduler from
 `FLUX2_BASE_MODEL_ID`. This also supports component repositories whose minimal
 `config.json` omits Transformers' `model_type` field. The base defaults to the
-official 4B Klein repository shown above.
+official, non-distilled 4B Klein base repository.
+
+The base checkpoint is not the four-step distilled checkpoint used in the
+first example, so start with 50 steps and guidance 4.0 rather than the
+distilled model's 4 steps and guidance 1.0.
 
 ## Sana Sprint 0.6B
 

@@ -15,7 +15,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         app.pipe = None
         app.MODEL_ID = "ponpoke/flux2-klein-4b-uncensored-text-encoder"
         app.PIPELINE_CLASS = "flux2_klein"
-        app.FLUX2_BASE_MODEL_ID = "black-forest-labs/FLUX.2-klein-4b"
+        app.FLUX2_BASE_MODEL_ID = "black-forest-labs/FLUX.2-klein-base-4B"
 
     def tearDown(self):
         (
