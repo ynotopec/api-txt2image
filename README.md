@@ -37,7 +37,30 @@ curl "$API_ORIGIN/v1/images/edits" \
   -F 'image=@input.png' \
   -F 'prompt=turn the daytime scene into a moonlit night' \
   -F 'size=1024x1024' \
-  -F 'response_format=b64_json'
+  -F 'response_format=b64_json' \
+  -o response.json
+```
+
+The JSON response embeds the generated PNG in `data[0].b64_json`. On Linux,
+extract and decode it with `jq` and `base64`:
+
+```bash
+jq -er '.data[0].b64_json' response.json | base64 --decode > edited.png
+file edited.png
+```
+
+Use `base64 -D` instead of `base64 --decode` on macOS. A portable Python
+alternative that does not require `jq` is:
+
+```bash
+python - <<'PY'
+import base64
+import json
+from pathlib import Path
+
+response = json.loads(Path("response.json").read_text())
+Path("edited.png").write_bytes(base64.b64decode(response["data"][0]["b64_json"]))
+PY
 ```
 
 The endpoint accepts the standard `image`, `prompt`, `model`, `n`, `size`, and
