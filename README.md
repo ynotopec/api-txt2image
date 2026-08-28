@@ -18,8 +18,8 @@ changes. `./upgrade.sh` remains as an alias for `./install.sh`.
 Generate an image using the widely supported OpenAI Images API shape:
 
 ```bash
-BASE_URL=http://127.0.0.1:8000
-curl "$BASE_URL/v1/images/generations" \
+API_ORIGIN=http://127.0.0.1:8000
+curl "$API_ORIGIN/v1/images/generations" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"a small robot painting","size":"1024x1024"}'
@@ -32,7 +32,7 @@ Edit an existing image with the OpenAI-compatible multipart endpoint used by
 Open WebUI:
 
 ```bash
-curl "$BASE_URL/v1/images/edits" \
+curl "$API_ORIGIN/v1/images/edits" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -F 'image=@input.png' \
   -F 'prompt=turn the daytime scene into a moonlit night' \
@@ -49,6 +49,14 @@ flow and does not expose `strength`.
 The configured Diffusers checkpoint must have an image-to-image counterpart;
 otherwise the API returns a descriptive HTTP 400 response. Uploaded images are
 limited to `MAX_UPLOAD_BYTES` (20 MiB by default).
+
+`API_ORIGIN` is the scheme and host only; do not include `/v1` in it when the
+curl path already starts with `/v1`. If a client calls its setting `BASE_URL`
+and expects an OpenAI API base that includes the version prefix, set it to
+`https://your-host.example/v1` and call `$BASE_URL/images/edits` instead. A URL
+such as `$BASE_URL/v1/images/edits` with that setting expands to
+`/v1/v1/images/edits` and returns `404 Not Found` because that route does not
+exist.
 
 ## Quantized Krea 2 Turbo
 
@@ -87,7 +95,7 @@ editing, so no second checkpoint is loaded. For example, after starting the
 service with the configuration above:
 
 ```bash
-curl "$BASE_URL/v1/images/edits" \
+curl "$API_ORIGIN/v1/images/edits" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -F 'image=@input.png' \
   -F 'prompt=replace the background with a snowy mountain landscape' \
