@@ -81,6 +81,44 @@ such as `$BASE_URL/v1/images/edits` with that setting expands to
 `/v1/v1/images/edits` and returns `404 Not Found` because that route does not
 exist.
 
+## Open WebUI
+
+In Open WebUI, open **Admin Panel → Settings → Images** and configure:
+
+- **Image Generation Engine**: `OpenAI`
+- **OpenAI API Base URL**: `https://your-host.example/v1`
+- **OpenAI API Key**: the same value as this service's `OPENAI_API_KEY`
+- **Image Generation Model**: the value of this service's `MODEL_ID`, for
+  example `black-forest-labs/FLUX.2-klein-4B`
+
+Save the settings and ensure that image generation is enabled for the users or
+group that will use it. To edit an image, start an image-generation request in
+Open WebUI, attach or select the source image, then describe the requested
+change. Open WebUI sends the source image and prompt to
+`POST /v1/images/edits`; the service returns the edited image as Base64 in its
+OpenAI-compatible response.
+
+The Open WebUI base URL **must include exactly one `/v1`**. Open WebUI appends
+`/images/edits` itself, so enter `https://your-host.example/v1`, not the full
+endpoint and not `https://your-host.example/v1/v1`. If Open WebUI runs in a
+container, `127.0.0.1` refers to that container rather than the host running
+this API. Use a DNS name reachable from the container, the Compose service name
+when both applications share a Docker network, or `host.docker.internal` when
+the container runtime provides it.
+
+The equivalent environment variables for an Open WebUI deployment are:
+
+```env
+ENABLE_IMAGE_GENERATION=true
+IMAGE_GENERATION_ENGINE=openai
+IMAGES_OPENAI_API_BASE_URL=https://your-host.example/v1
+IMAGES_OPENAI_API_KEY=replace-with-the-same-service-key
+IMAGE_GENERATION_MODEL=black-forest-labs/FLUX.2-klein-4B
+```
+
+Do not put the key directly in `docker-compose.yml` if that file is committed;
+load it from an untracked `.env` file or a container secret instead.
+
 ## Quantized Krea 2 Turbo
 
 The `OzzyGT/Krea_2_Turbo_nunchaku_lite_nvfp4` repository can be selected through
