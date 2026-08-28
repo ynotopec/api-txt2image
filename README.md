@@ -28,6 +28,28 @@ curl "$BASE_URL/v1/images/generations" \
 The response contains `data[].b64_json`. Health is available without a token at
 `GET /healthz`. Interactive API documentation is at `/docs`.
 
+Edit an existing image with the OpenAI-compatible multipart endpoint used by
+Open WebUI:
+
+```bash
+curl "$BASE_URL/v1/images/edits" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -F 'image=@input.png' \
+  -F 'prompt=turn the daytime scene into a moonlit night' \
+  -F 'size=1024x1024' \
+  -F 'response_format=b64_json'
+```
+
+The endpoint accepts the standard `image`, `prompt`, `model`, `n`, `size`, and
+`response_format=b64_json` form fields. It also supports the optional local
+controls `steps`, `guidance_scale`, `strength`, `seed`, and `negative_prompt`.
+Parameters that are not implemented by the selected Diffusers pipeline are
+ignored; in particular, FLUX.2 Klein uses its native reference-image editing
+flow and does not expose `strength`.
+The configured Diffusers checkpoint must have an image-to-image counterpart;
+otherwise the API returns a descriptive HTTP 400 response. Uploaded images are
+limited to `MAX_UPLOAD_BYTES` (20 MiB by default).
+
 ## Quantized Krea 2 Turbo
 
 The `OzzyGT/Krea_2_Turbo_nunchaku_lite_nvfp4` repository can be selected through
@@ -58,6 +80,23 @@ TORCH_DTYPE=bf16
 DEFAULT_STEPS=4
 DEFAULT_GUIDANCE=1.0
 ```
+
+This configuration supports the `/v1/images/edits` endpoint too. FLUX.2 Klein
+uses the same `Flux2KleinPipeline` for text generation and reference-image
+editing, so no second checkpoint is loaded. For example, after starting the
+service with the configuration above:
+
+```bash
+curl "$BASE_URL/v1/images/edits" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -F 'image=@input.png' \
+  -F 'prompt=replace the background with a snowy mountain landscape' \
+  -F 'model=black-forest-labs/FLUX.2-klein-4B' \
+  -F 'size=1024x1024'
+```
+
+The `model` form value is accepted for OpenAI/Open WebUI compatibility; this
+single-model server always runs the checkpoint configured by `MODEL_ID`.
 
 The `black-forest-labs/FLUX.2-klein-4b-fp8` and `-nvfp4` repositories are
 single-file quantized transformer checkpoints, not complete Diffusers

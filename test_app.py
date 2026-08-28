@@ -1,9 +1,16 @@
+import asyncio
+import base64
+import io
 import unittest
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import app
+from fastapi import HTTPException, UploadFile
+from fastapi.testclient import TestClient
+from PIL import Image
 
 
 class Flux2TextEncoderLoadingTests(unittest.TestCase):
@@ -122,6 +129,167 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         self.assertIs(fallback_kwargs["generation_config"], generation_config)
         self.assertTrue(fallback_kwargs["local_files_only"])
         self.assertNotIn("subfolder", fallback_kwargs)
+
+
+class ImageEditingTests(unittest.TestCase):
+    def test_openai_multipart_edit_endpoint_returns_base64_image(self):
+        source = io.BytesIO()
+        Image.new("RGB", (8, 8), "red").save(source, format="PNG")
+        result_image = Image.new("RGB", (16, 16), "blue")
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            patch.object(app, "ensure_pipe_loaded", new=AsyncMock()),
+            patch.object(
+                app, "edit_images", new=AsyncMock(return_value=[result_image])
+            ) as edit,
+        ):
+            response = TestClient(app.app).post(
+                "/v1/images/edits",
+                headers={"Authorization": "Bearer test-key"},
+                files={"image": ("input.png", source.getvalue(), "image/png")},
+                data={
+                    "prompt": "make it blue",
+                    "model": "ignored-for-compatibility",
+                    "size": "512x512",
+                    "response_format": "b64_json",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("created", response.json())
+        encoded = response.json()["data"][0]["b64_json"]
+        self.assertTrue(base64.b64decode(encoded).startswith(b"\x89PNG"))
+        self.assertEqual(edit.await_args.kwargs["prompt"], "make it blue")
+        self.assertEqual(edit.await_args.kwargs["width"], 512)
+
+    def test_uploaded_image_is_decoded_as_rgb(self):
+        buffer = io.BytesIO()
+        Image.new("RGBA", (12, 8), (255, 0, 0, 128)).save(buffer, format="PNG")
+        upload = UploadFile(filename="input.png", file=io.BytesIO(buffer.getvalue()))
+
+        result = asyncio.run(app.decode_uploaded_image(upload))
+
+        self.assertEqual(result.mode, "RGB")
+        self.assertEqual(result.size, (12, 8))
+
+    def test_invalid_uploaded_image_returns_bad_request(self):
+        upload = UploadFile(filename="input.txt", file=io.BytesIO(b"not an image"))
+
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(app.decode_uploaded_image(upload))
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_edit_uses_image_to_image_pipeline_and_openai_parameters(self):
+        original_pipe = app.pipe
+
+        class TextToImagePipeline:
+            def __call__(self, prompt):
+                del prompt
+
+        app.pipe = TextToImagePipeline()
+        output_image = Image.new("RGB", (16, 16))
+
+        class FakeEditPipeline:
+            def __init__(self):
+                self.kwargs = None
+
+            def __call__(
+                self,
+                prompt,
+                image,
+                strength,
+                num_inference_steps,
+                guidance_scale,
+                num_images_per_prompt,
+                generator,
+                negative_prompt=None,
+            ):
+                self.kwargs = locals()
+                return SimpleNamespace(images=[output_image])
+
+        edit_pipeline = FakeEditPipeline()
+        try:
+            with patch.object(
+                app.AutoPipelineForImage2Image,
+                "from_pipe",
+                return_value=edit_pipeline,
+            ) as convert_pipeline:
+                result = asyncio.run(
+                    app.edit_images(
+                        image=Image.new("RGB", (8, 8)),
+                        prompt="make it blue",
+                        width=16,
+                        height=16,
+                        steps=10,
+                        guidance_scale=3.5,
+                        strength=0.6,
+                        n=1,
+                        seed=None,
+                        negative_prompt="red",
+                    )
+                )
+        finally:
+            app.pipe = original_pipe
+
+        convert_pipeline.assert_called_once()
+        self.assertEqual(result, [output_image])
+        self.assertEqual(edit_pipeline.kwargs["prompt"], "make it blue")
+        self.assertEqual(edit_pipeline.kwargs["image"].size, (16, 16))
+        self.assertEqual(edit_pipeline.kwargs["strength"], 0.6)
+        self.assertEqual(edit_pipeline.kwargs["negative_prompt"], "red")
+
+    def test_flux2_klein_style_unified_pipeline_is_used_directly(self):
+        original_pipe = app.pipe
+        output_image = Image.new("RGB", (16, 16))
+
+        class UnifiedPipeline:
+            def __init__(self):
+                self.kwargs = None
+
+            def __call__(
+                self,
+                image=None,
+                prompt=None,
+                width=None,
+                height=None,
+                num_inference_steps=4,
+                guidance_scale=1.0,
+                num_images_per_prompt=1,
+                generator=None,
+                max_sequence_length=512,
+            ):
+                self.kwargs = locals()
+                return SimpleNamespace(images=[output_image])
+
+        unified_pipeline = UnifiedPipeline()
+        app.pipe = unified_pipeline
+        try:
+            with patch.object(
+                app.AutoPipelineForImage2Image, "from_pipe"
+            ) as convert_pipeline:
+                result = asyncio.run(
+                    app.edit_images(
+                        image=Image.new("RGB", (8, 8)),
+                        prompt="change the background",
+                        width=16,
+                        height=16,
+                        steps=4,
+                        guidance_scale=1.0,
+                        strength=0.75,
+                        n=1,
+                        seed=None,
+                        negative_prompt=None,
+                    )
+                )
+        finally:
+            app.pipe = original_pipe
+
+        convert_pipeline.assert_not_called()
+        self.assertEqual(result, [output_image])
+        self.assertEqual(unified_pipeline.kwargs["prompt"], "change the background")
+        self.assertEqual(unified_pipeline.kwargs["image"].size, (16, 16))
 
 
 if __name__ == "__main__":
