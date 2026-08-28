@@ -8,15 +8,19 @@ flowchart LR
     Auth[Bearer token validation\nOPENAI_API_KEY]
     Queue[GPU semaphore\nMAX_CONCURRENT]
     Pipeline[Diffusers text-to-image pipeline\nauto or explicit model loader]
+    EditPipeline[Diffusers image-to-image adapter]
     Idle[Idle monitor task\nIDLE_UNLOAD_SECONDS]
     GPU[(CUDA / CPU runtime)]
 
     Client -->|POST /v1/images/generations| Uvicorn
+    Client -->|POST multipart /v1/images/edits| Uvicorn
     Client -->|GET /healthz| Uvicorn
     Uvicorn --> API
     API --> Auth
     API --> Queue
     Queue --> Pipeline
+    Pipeline --> EditPipeline
+    EditPipeline --> GPU
     API --> Idle
     Idle -->|idle timeout| Pipeline
     Pipeline --> GPU

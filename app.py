@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional, Literal, List, Tuple, Set
 
 import torch
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ from huggingface_hub import snapshot_download
 from transformers import AutoConfig, AutoModelForCausalLM, GenerationConfig
 
 from diffusers import (
+    AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
     Flux2KleinPipeline,
     FluxPipeline,
@@ -109,10 +110,14 @@ def parse_size(size_str: str) -> Tuple[int, int]:
         w_str, h_str = size_str.lower().split("x")
         w, h = int(w_str), int(h_str)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid size format. Use 'WxH', e.g. 1024x1024.")
+        raise HTTPException(
+            status_code=400, detail="Invalid size format. Use 'WxH', e.g. 1024x1024."
+        )
 
     if w <= 0 or h <= 0:
-        raise HTTPException(status_code=400, detail="Width/height must be positive integers.")
+        raise HTTPException(
+            status_code=400, detail="Width/height must be positive integers."
+        )
 
     if ALLOWED_SIZES and size_str not in ALLOWED_SIZES:
         raise HTTPException(
@@ -123,7 +128,7 @@ def parse_size(size_str: str) -> Tuple[int, int]:
     if w * h > MAX_PIXELS:
         raise HTTPException(
             status_code=400,
-            detail=f"Requested size too large: {w*h}. Max pixels: {MAX_PIXELS}.",
+            detail=f"Requested size too large: {w * h}. Max pixels: {MAX_PIXELS}.",
         )
 
     if (w % REQUIRE_MULTIPLE_OF) != 0 or (h % REQUIRE_MULTIPLE_OF) != 0:
@@ -177,6 +182,27 @@ def encode_image_b64(img, fmt: str = "PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+async def decode_uploaded_image(image: UploadFile):
+    """Read an uploaded image while applying a conservative request-size limit."""
+    from PIL import Image, UnidentifiedImageError
+
+    max_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+    contents = await image.read(max_bytes + 1)
+    if len(contents) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Image exceeds {max_bytes} bytes.")
+
+    try:
+        source = Image.open(io.BytesIO(contents))
+        source.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(
+            status_code=400, detail="The uploaded file is not a valid image."
+        ) from exc
+
+    # RGB is accepted by the broadest range of Diffusers image-to-image pipelines.
+    return source.convert("RGB")
 
 
 class UnsupportedModelError(RuntimeError):
@@ -279,7 +305,9 @@ def load_pipeline() -> None:
         pipeline_loader = AutoPipelineForText2Image
         resolved_pipeline_class = "auto_t2i"
 
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", os.getenv("HF_HUB_ENABLE_HF_TRANSFER", "1"))
+    os.environ.setdefault(
+        "HF_HUB_ENABLE_HF_TRANSFER", os.getenv("HF_HUB_ENABLE_HF_TRANSFER", "1")
+    )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -301,7 +329,9 @@ def load_pipeline() -> None:
     if cache_dir:
         load_kwargs["cache_dir"] = cache_dir
 
-    if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(".safetensors"):
+    if resolved_pipeline_class == "z_image" and MODEL_ID.lower().endswith(
+        ".safetensors"
+    ):
         raise UnsupportedModelError(
             "Z-Image single-file checkpoints from Comfy-Org are ComfyUI-native and cannot be loaded "
             "by Diffusers. Use MODEL_ID=Tongyi-MAI/Z-Image-Turbo, or run this NVFP4 checkpoint "
@@ -342,7 +372,9 @@ def load_pipeline() -> None:
             subfolder="text_encoder",
             **config_kwargs,
         )
-        text_encoder = load_text_encoder_weights(MODEL_ID, text_encoder_config, load_kwargs)
+        text_encoder = load_text_encoder_weights(
+            MODEL_ID, text_encoder_config, load_kwargs
+        )
         load_kwargs["text_encoder"] = text_encoder
 
     pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)
@@ -366,7 +398,9 @@ def load_pipeline() -> None:
         except Exception as e:
             print(f"[WARN] torch.compile failed: {e}")
 
-    print(f"[INFO] Pipeline loaded in {time.perf_counter() - t0:.1f}s on device='{device}'")
+    print(
+        f"[INFO] Pipeline loaded in {time.perf_counter() - t0:.1f}s on device='{device}'"
+    )
 
 
 def unload_pipeline() -> None:
@@ -521,6 +555,81 @@ async def generate_images(
     return out.images
 
 
+async def edit_images(
+    image,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    guidance_scale: float,
+    strength: float,
+    n: int,
+    seed: Optional[int],
+    negative_prompt: Optional[str],
+) -> List:
+    """Run the loaded model through its Diffusers image-to-image counterpart."""
+    global pipe
+
+    if pipe is None:
+        raise HTTPException(status_code=500, detail="Pipeline not initialized.")
+
+    # OpenAI's edit endpoint uses the requested `size` for its output. Resizing the
+    # input also avoids pipeline-specific implicit dimension rounding.
+    source_image = image.resize((width, height))
+    generator = make_generator(seed)
+
+    def _run_pipeline():
+        # Unified pipelines such as FLUX.2 Klein implement generation and editing
+        # in the same class. Use them directly instead of asking AutoPipeline to
+        # reconstruct an equivalent wrapper around the shared components.
+        base_call_sig = inspect.signature(pipe.__call__)
+        if "image" in base_call_sig.parameters:
+            edit_pipe = pipe
+        else:
+            try:
+                edit_pipe = AutoPipelineForImage2Image.from_pipe(pipe)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The configured model does not support image editing: {exc}",
+                ) from exc
+
+        requested_kwargs = {
+            "prompt": prompt,
+            "image": source_image,
+            "width": width,
+            "height": height,
+            "strength": strength,
+            "num_inference_steps": steps,
+            "guidance_scale": guidance_scale,
+            "num_images_per_prompt": n,
+            "generator": generator,
+        }
+        call_sig = (
+            base_call_sig
+            if edit_pipe is pipe
+            else inspect.signature(edit_pipe.__call__)
+        )
+        call_kwargs = {
+            key: value
+            for key, value in requested_kwargs.items()
+            if key in call_sig.parameters
+        }
+        if negative_prompt is not None and "negative_prompt" in call_sig.parameters:
+            call_kwargs["negative_prompt"] = negative_prompt
+        if "max_sequence_length" in call_sig.parameters:
+            call_kwargs["max_sequence_length"] = MAX_SEQUENCE_LENGTH
+
+        if torch.cuda.is_available():
+            with torch.inference_mode(), torch.autocast("cuda", dtype=TORCH_DTYPE):
+                return edit_pipe(**call_kwargs)
+        with torch.inference_mode():
+            return edit_pipe(**call_kwargs)
+
+    out = await asyncio.to_thread(_run_pipeline)
+    return out.images
+
+
 # -----------------------------
 # Startup / shutdown
 # -----------------------------
@@ -630,6 +739,56 @@ async def create_image_generation(
         {
             "created": int(time.time()),
             "data": data,
+        }
+    )
+
+
+@app.post("/v1/images/edits")
+async def create_image_edit(
+    image: UploadFile = File(...),
+    prompt: str = Form(..., min_length=1),
+    model: Optional[str] = Form(default=None),
+    n: int = Form(default=1, ge=1, le=8),
+    size: str = Form(default="1024x1024"),
+    response_format: Literal["b64_json"] = Form(default="b64_json"),
+    steps: int = Form(default=DEFAULT_STEPS, ge=1, le=150),
+    guidance_scale: float = Form(default=DEFAULT_GUIDANCE, ge=0.0, le=30.0),
+    strength: float = Form(default=0.75, gt=0.0, le=1.0),
+    seed: Optional[int] = Form(default=None, ge=0),
+    negative_prompt: Optional[str] = Form(default=None),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    """OpenAI-compatible multipart image edit endpoint used by Open WebUI."""
+    global last_used_at
+
+    # `model` is accepted for OpenAI/Open WebUI compatibility. This single-model
+    # service always uses MODEL_ID, just as the generation endpoint does.
+    del model, response_format
+    validate_bearer(credentials)
+    width, height = parse_size(size)
+    source_image = await decode_uploaded_image(image)
+
+    async with gpu_sem:
+        await ensure_pipe_loaded()
+        last_used_at = time.time()
+        imgs = await edit_images(
+            image=source_image,
+            prompt=prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            guidance_scale=guidance_scale,
+            strength=strength,
+            n=n,
+            seed=seed,
+            negative_prompt=negative_prompt,
+        )
+        last_used_at = time.time()
+
+    return JSONResponse(
+        {
+            "created": int(time.time()),
+            "data": [{"b64_json": encode_image_b64(img, fmt="PNG")} for img in imgs],
         }
     )
 
