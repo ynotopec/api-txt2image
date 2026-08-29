@@ -98,6 +98,11 @@ change. Open WebUI sends the source image and prompt to
 `POST /v1/images/edits`; the service returns the edited image as Base64 in its
 OpenAI-compatible response.
 
+Open WebUI versions and OpenAI-compatible clients do not all encode multiple
+multipart files the same way. The endpoint accepts both `image` and the
+array-style `image[]` field used by the Open WebUI edit tool; when several
+`image[]` files are supplied, the first is used as the source image.
+
 The Open WebUI base URL **must include exactly one `/v1`**. Open WebUI appends
 `/images/edits` itself, so enter `https://your-host.example/v1`, not the full
 endpoint and not `https://your-host.example/v1/v1`. If Open WebUI runs in a
@@ -118,6 +123,14 @@ IMAGE_GENERATION_MODEL=black-forest-labs/FLUX.2-klein-4B
 
 Do not put the key directly in `docker-compose.yml` if that file is committed;
 load it from an untracked `.env` file or a container secret instead.
+
+If the tool displays `400: [ERROR: Unprocessable Entity]`, first restart this
+API after updating it, then inspect this API's server log. That Open WebUI
+message wraps an upstream validation error and hides its useful details. Verify
+the configured base URL and key, and reproduce the request with the curl
+example above. A missing upload now produces the explicit message `A source
+image is required in multipart field 'image' or 'image[]'.` instead of a
+generic FastAPI `422` response.
 
 ## Quantized Krea 2 Turbo
 
