@@ -18,8 +18,8 @@ changes. `./upgrade.sh` remains as an alias for `./install.sh`.
 Generate an image using the widely supported OpenAI Images API shape:
 
 ```bash
-BASE_URL=http://127.0.0.1:8000
-curl "$BASE_URL/v1/images/generations" \
+API_ORIGIN=http://127.0.0.1:8000
+curl "$API_ORIGIN/v1/images/generations" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"a small robot painting","size":"1024x1024"}'
@@ -32,12 +32,35 @@ Edit an existing image with the OpenAI-compatible multipart endpoint used by
 Open WebUI:
 
 ```bash
-curl "$BASE_URL/v1/images/edits" \
+curl "$API_ORIGIN/v1/images/edits" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -F 'image=@input.png' \
   -F 'prompt=turn the daytime scene into a moonlit night' \
   -F 'size=1024x1024' \
-  -F 'response_format=b64_json'
+  -F 'response_format=b64_json' \
+  -o response.json
+```
+
+The JSON response embeds the generated PNG in `data[0].b64_json`. On Linux,
+extract and decode it with `jq` and `base64`:
+
+```bash
+jq -er '.data[0].b64_json' response.json | base64 --decode > edited.png
+file edited.png
+```
+
+Use `base64 -D` instead of `base64 --decode` on macOS. A portable Python
+alternative that does not require `jq` is:
+
+```bash
+python - <<'PY'
+import base64
+import json
+from pathlib import Path
+
+response = json.loads(Path("response.json").read_text())
+Path("edited.png").write_bytes(base64.b64decode(response["data"][0]["b64_json"]))
+PY
 ```
 
 The endpoint accepts the standard `image`, `prompt`, `model`, `n`, `size`, and
@@ -49,6 +72,65 @@ flow and does not expose `strength`.
 The configured Diffusers checkpoint must have an image-to-image counterpart;
 otherwise the API returns a descriptive HTTP 400 response. Uploaded images are
 limited to `MAX_UPLOAD_BYTES` (20 MiB by default).
+
+`API_ORIGIN` is the scheme and host only; do not include `/v1` in it when the
+curl path already starts with `/v1`. If a client calls its setting `BASE_URL`
+and expects an OpenAI API base that includes the version prefix, set it to
+`https://your-host.example/v1` and call `$BASE_URL/images/edits` instead. A URL
+such as `$BASE_URL/v1/images/edits` with that setting expands to
+`/v1/v1/images/edits` and returns `404 Not Found` because that route does not
+exist.
+
+## Open WebUI
+
+In Open WebUI, open **Admin Panel → Settings → Images** and configure:
+
+- **Image Generation Engine**: `OpenAI`
+- **OpenAI API Base URL**: `https://your-host.example/v1`
+- **OpenAI API Key**: the same value as this service's `OPENAI_API_KEY`
+- **Image Generation Model**: the value of this service's `MODEL_ID`, for
+  example `black-forest-labs/FLUX.2-klein-4B`
+
+Save the settings and ensure that image generation is enabled for the users or
+group that will use it. To edit an image, start an image-generation request in
+Open WebUI, attach or select the source image, then describe the requested
+change. Open WebUI sends the source image and prompt to
+`POST /v1/images/edits`; the service returns the edited image as Base64 in its
+OpenAI-compatible response.
+
+Open WebUI versions and OpenAI-compatible clients do not all encode multiple
+multipart files the same way. The endpoint accepts both `image` and the
+array-style `image[]` field used by the Open WebUI edit tool; when several
+`image[]` files are supplied, the first is used as the source image.
+
+The Open WebUI base URL **must include exactly one `/v1`**. Open WebUI appends
+`/images/edits` itself, so enter `https://your-host.example/v1`, not the full
+endpoint and not `https://your-host.example/v1/v1`. If Open WebUI runs in a
+container, `127.0.0.1` refers to that container rather than the host running
+this API. Use a DNS name reachable from the container, the Compose service name
+when both applications share a Docker network, or `host.docker.internal` when
+the container runtime provides it.
+
+The equivalent environment variables for an Open WebUI deployment are:
+
+```env
+ENABLE_IMAGE_GENERATION=true
+IMAGE_GENERATION_ENGINE=openai
+IMAGES_OPENAI_API_BASE_URL=https://your-host.example/v1
+IMAGES_OPENAI_API_KEY=replace-with-the-same-service-key
+IMAGE_GENERATION_MODEL=black-forest-labs/FLUX.2-klein-4B
+```
+
+Do not put the key directly in `docker-compose.yml` if that file is committed;
+load it from an untracked `.env` file or a container secret instead.
+
+If the tool displays `400: [ERROR: Unprocessable Entity]`, first restart this
+API after updating it, then inspect this API's server log. That Open WebUI
+message wraps an upstream validation error and hides its useful details. Verify
+the configured base URL and key, and reproduce the request with the curl
+example above. A missing upload now produces the explicit message `A source
+image is required in multipart field 'image' or 'image[]'.` instead of a
+generic FastAPI `422` response.
 
 ## Quantized Krea 2 Turbo
 
@@ -87,7 +169,7 @@ editing, so no second checkpoint is loaded. For example, after starting the
 service with the configuration above:
 
 ```bash
-curl "$BASE_URL/v1/images/edits" \
+curl "$API_ORIGIN/v1/images/edits" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -F 'image=@input.png' \
   -F 'prompt=replace the background with a snowy mountain landscape' \

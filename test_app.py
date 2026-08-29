@@ -132,6 +132,12 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
 
 
 class ImageEditingTests(unittest.TestCase):
+    @staticmethod
+    def _png_bytes(color="red"):
+        source = io.BytesIO()
+        Image.new("RGB", (8, 8), color).save(source, format="PNG")
+        return source.getvalue()
+
     def test_openai_multipart_edit_endpoint_returns_base64_image(self):
         source = io.BytesIO()
         Image.new("RGB", (8, 8), "red").save(source, format="PNG")
@@ -162,6 +168,39 @@ class ImageEditingTests(unittest.TestCase):
         self.assertTrue(base64.b64decode(encoded).startswith(b"\x89PNG"))
         self.assertEqual(edit.await_args.kwargs["prompt"], "make it blue")
         self.assertEqual(edit.await_args.kwargs["width"], 512)
+
+    def test_openwebui_array_style_image_field_is_accepted(self):
+        result_image = Image.new("RGB", (16, 16), "blue")
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            patch.object(app, "ensure_pipe_loaded", new=AsyncMock()),
+            patch.object(
+                app, "edit_images", new=AsyncMock(return_value=[result_image])
+            ) as edit,
+        ):
+            response = TestClient(app.app).post(
+                "/v1/images/edits",
+                headers={"Authorization": "Bearer test-key"},
+                files=[
+                    ("image[]", ("input.png", self._png_bytes(), "image/png"))
+                ],
+                data={"prompt": "add a cat", "size": "512x512"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(edit.await_args.kwargs["prompt"], "add a cat")
+
+    def test_missing_edit_image_returns_descriptive_bad_request(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            response = TestClient(app.app).post(
+                "/v1/images/edits",
+                headers={"Authorization": "Bearer test-key"},
+                data={"prompt": "add a cat", "size": "512x512"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("'image' or 'image[]'", response.json()["detail"])
 
     def test_uploaded_image_is_decoded_as_rgb(self):
         buffer = io.BytesIO()

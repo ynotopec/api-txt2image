@@ -745,7 +745,8 @@ async def create_image_generation(
 
 @app.post("/v1/images/edits")
 async def create_image_edit(
-    image: UploadFile = File(...),
+    image: Optional[UploadFile] = File(default=None),
+    image_array: Optional[List[UploadFile]] = File(default=None, alias="image[]"),
     prompt: str = Form(..., min_length=1),
     model: Optional[str] = Form(default=None),
     n: int = Form(default=1, ge=1, le=8),
@@ -766,7 +767,17 @@ async def create_image_edit(
     del model, response_format
     validate_bearer(credentials)
     width, height = parse_size(size)
-    source_image = await decode_uploaded_image(image)
+    # OpenAI clients use both `image` and the array-style multipart name
+    # `image[]`. Open WebUI can emit the latter when its edit tool forwards
+    # selected images. This service currently edits one source image, so use
+    # the first array item when the singular field is absent.
+    source_upload = image or (image_array[0] if image_array else None)
+    if source_upload is None:
+        raise HTTPException(
+            status_code=400,
+            detail="A source image is required in multipart field 'image' or 'image[]'.",
+        )
+    source_image = await decode_uploaded_image(source_upload)
 
     async with gpu_sem:
         await ensure_pipe_loaded()
