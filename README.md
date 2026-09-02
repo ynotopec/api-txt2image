@@ -194,39 +194,26 @@ example:
 ```env
 MODEL_ID=ponpoke/flux2-klein-4b-uncensored-text-encoder
 PIPELINE_CLASS=flux2_klein
-FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-base-4B
+FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-4B
 FLUX2_TEXT_ENCODER_SUBFOLDER=text_encoder
 TORCH_DTYPE=bf16
-DEFAULT_STEPS=50
-DEFAULT_GUIDANCE=4.0
-```
-
-`MODEL_ID` must name the replacement repository you actually want to test. In
-particular, the example above loads PonPoke's **4B** encoder; it does not load
-`ponpoke/flux2-klein-9b-uncensored-text-encoder`. To use the latter, set that
-exact repository ID and pair it with the corresponding FLUX.2 Klein 9B base
-pipeline rather than the 4B pipeline:
-
-```env
-MODEL_ID=ponpoke/flux2-klein-9b-uncensored-text-encoder
-PIPELINE_CLASS=flux2_klein
-FLUX2_BASE_MODEL_ID=black-forest-labs/FLUX.2-klein-base-9B
-FLUX2_TEXT_ENCODER_SUBFOLDER=text_encoder
-TORCH_DTYPE=bf16
-DEFAULT_STEPS=50
-DEFAULT_GUIDANCE=4.0
+DEFAULT_STEPS=4
+DEFAULT_GUIDANCE=1.0
 ```
 
 The replacement is only the text encoder. The transformer that denoises and
 renders the image, along with the VAE and scheduler, still comes from
-`FLUX2_BASE_MODEL_ID`. Consequently, selecting a 9B-named encoder while keeping
-the official 4B pipeline does **not** turn the image model into a 9B model.
-Likewise, an uncensored encoder is not expected to make ordinary prompts look
-dramatically different: its main effect is on how prompts that previously
-triggered refusals or safety-related conditioning are encoded. For a useful
-comparison, keep the prompt, seed, dimensions, steps, guidance, and base model
-identical, change only the encoder repository, and use a prompt relevant to the
-encoder fine-tune. On startup, confirm that the log contains both
+`FLUX2_BASE_MODEL_ID`. With the configuration above, the image-generating model
+is therefore still the official distilled FLUX.2 Klein 4B model. The PonPoke
+repository changes how the prompt is encoded; it does not replace the denoising
+transformer or generally alter the rendering style.
+
+As a result, an uncensored encoder is not expected to make ordinary prompts
+look dramatically different. Its intended effect is most apparent for prompts
+whose interpretation was affected by refusals or safety-related conditioning.
+For a useful A/B comparison, keep the prompt, seed, dimensions, steps, guidance,
+and `FLUX2_BASE_MODEL_ID` identical, and change only whether the replacement
+encoder is supplied. On startup, confirm that the log contains both
 `Loading FLUX.2 text_encoder='…'` and `FLUX.2 replacement text encoder active`;
 otherwise the replacement was not installed in the pipeline.
 
@@ -234,8 +221,9 @@ Because the component repository has no pipeline-level `model_index.json`, the
 service loads its weights as the `text_encoder` and obtains the encoder
 configuration, tokenizer, transformer, VAE, and scheduler from
 `FLUX2_BASE_MODEL_ID`. This also supports component repositories whose minimal
-`config.json` omits Transformers' `model_type` field. The base defaults to the
-official, non-distilled 4B Klein base repository.
+`config.json` omits Transformers' `model_type` field. Set the base explicitly as
+shown above when using the four-step distilled model; if it is omitted, the
+service defaults to the official, non-distilled 4B Klein base repository.
 
 The replacement repository stores its Transformers checkpoint under its
 `text_encoder/` directory rather than at the repository root. Its checkpoint
@@ -250,9 +238,8 @@ the base model configuration. This prevents recent Transformers versions from
 trying to resolve a nonexistent `generation_config.json` in the temporary
 checkpoint view.
 
-The base checkpoint is not the four-step distilled checkpoint used in the
-first example, so start with 50 steps and guidance 4.0 rather than the
-distilled model's 4 steps and guidance 1.0.
+When using `black-forest-labs/FLUX.2-klein-base-4B` instead, start with 50 steps
+and guidance 4.0 rather than the distilled model's 4 steps and guidance 1.0.
 
 ## Sana Sprint 0.6B
 
