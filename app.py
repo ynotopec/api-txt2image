@@ -379,6 +379,14 @@ def load_pipeline() -> None:
 
     pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)
 
+    if "text_encoder" in load_kwargs:
+        if getattr(pipe, "text_encoder", None) is not load_kwargs["text_encoder"]:
+            raise UnsupportedModelError(
+                "The FLUX.2 pipeline did not retain the configured replacement "
+                "text encoder. Refusing to run with the base encoder silently."
+            )
+        print(f"[INFO] FLUX.2 replacement text encoder active: '{MODEL_ID}'")
+
     pipe.set_progress_bar_config(disable=True)
 
     if os.getenv("ENABLE_XFORMERS", "0") == "1":
