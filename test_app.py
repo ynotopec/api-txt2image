@@ -42,6 +42,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         generation_config = object()
         text_encoder = object()
         pipeline = MagicMock()
+        pipeline.text_encoder = text_encoder
         pipeline.to.return_value = pipeline
 
         with (
@@ -82,6 +83,34 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         pipeline_args, pipeline_kwargs = load_pipeline.call_args
         self.assertEqual(pipeline_args, (app.FLUX2_BASE_MODEL_ID,))
         self.assertIs(pipeline_kwargs["text_encoder"], text_encoder)
+
+    def test_rejects_pipeline_that_discards_replacement_encoder(self):
+        pipeline = MagicMock()
+        pipeline.text_encoder = object()
+        pipeline.to.return_value = pipeline
+
+        with (
+            patch.object(app.AutoConfig, "from_pretrained", return_value=object()),
+            patch.object(
+                app.GenerationConfig,
+                "from_model_config",
+                return_value=object(),
+            ),
+            patch.object(
+                app.AutoModelForCausalLM,
+                "from_pretrained",
+                return_value=object(),
+            ),
+            patch.object(
+                app.Flux2KleinPipeline,
+                "from_pretrained",
+                return_value=pipeline,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                app.UnsupportedModelError, "did not retain"
+            ):
+                app.load_pipeline()
 
     def test_custom_named_safetensors_checkpoint_is_loaded(self):
         encoder_config = object()
