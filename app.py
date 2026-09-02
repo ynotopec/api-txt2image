@@ -84,6 +84,7 @@ bearer_scheme = HTTPBearer()
 gpu_sem = asyncio.Semaphore(MAX_CONCURRENT)
 
 pipe: Optional[AutoPipelineForText2Image] = None
+active_replacement_text_encoder: Optional[str] = None
 last_used_at: float = time.time()
 idle_monitor_task: Optional[asyncio.Task] = None
 
@@ -268,11 +269,12 @@ def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
 # Pipeline lifecycle
 # -----------------------------
 def load_pipeline() -> None:
-    global pipe
+    global pipe, active_replacement_text_encoder
 
     if pipe is not None:
         return
 
+    active_replacement_text_encoder = None
     torch.backends.cuda.matmul.allow_tf32 = True
 
     try:
@@ -381,11 +383,15 @@ def load_pipeline() -> None:
 
     if "text_encoder" in load_kwargs:
         if getattr(pipe, "text_encoder", None) is not load_kwargs["text_encoder"]:
+            unload_pipeline()
             raise UnsupportedModelError(
                 "The FLUX.2 pipeline did not retain the configured replacement "
                 "text encoder. Refusing to run with the base encoder silently."
             )
         print(f"[INFO] FLUX.2 replacement text encoder active: '{MODEL_ID}'")
+        active_replacement_text_encoder = MODEL_ID
+    else:
+        active_replacement_text_encoder = None
 
     pipe.set_progress_bar_config(disable=True)
 
@@ -422,9 +428,10 @@ def unload_pipeline() -> None:
     - We delete the pipeline and clear CUDA cache.
       The next request reloads it from disk/cache.
     """
-    global pipe
+    global pipe, active_replacement_text_encoder
 
     if pipe is None:
+        active_replacement_text_encoder = None
         return
 
     print("[INFO] unloading pipeline: deleting pipeline and clearing CUDA cache")
@@ -434,6 +441,7 @@ def unload_pipeline() -> None:
         del pipe
     finally:
         pipe = None
+        active_replacement_text_encoder = None
 
     gc.collect()
 
@@ -702,9 +710,21 @@ async def shutdown() -> None:
 # -----------------------------
 @app.get("/healthz")
 def healthz():
+    replacement_text_encoder = (
+        MODEL_ID
+        if PIPELINE_CLASS == "flux2_klein"
+        and MODEL_ID.lower().endswith(FLUX2_TEXT_ENCODER_SUFFIXES)
+        else None
+    )
     return {
         "ok": True,
         "model_id": MODEL_ID,
+        "pipeline_class": PIPELINE_CLASS,
+        "base_model_id": FLUX2_BASE_MODEL_ID if replacement_text_encoder else None,
+        "replacement_text_encoder": replacement_text_encoder,
+        "replacement_text_encoder_active": (
+            replacement_text_encoder == active_replacement_text_encoder
+        ),
         "dtype": str(TORCH_DTYPE),
         "max_concurrent": MAX_CONCURRENT,
         "pipeline_loaded": pipe is not None,

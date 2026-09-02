@@ -21,6 +21,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
             app.PIPELINE_CLASS,
             app.FLUX2_BASE_MODEL_ID,
             app.FLUX2_TEXT_ENCODER_SUBFOLDER,
+            app.active_replacement_text_encoder,
         )
         app.pipe = None
         app.MODEL_ID = "ponpoke/flux2-klein-4b-uncensored-text-encoder"
@@ -35,6 +36,7 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
             app.PIPELINE_CLASS,
             app.FLUX2_BASE_MODEL_ID,
             app.FLUX2_TEXT_ENCODER_SUBFOLDER,
+            app.active_replacement_text_encoder,
         ) = self.original_values
 
     def test_uses_base_encoder_config_with_replacement_weights(self):
@@ -158,6 +160,29 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         self.assertIs(fallback_kwargs["generation_config"], generation_config)
         self.assertTrue(fallback_kwargs["local_files_only"])
         self.assertNotIn("subfolder", fallback_kwargs)
+
+    def test_health_reports_active_replacement_encoder(self):
+        app.pipe = SimpleNamespace(text_encoder=object())
+        app.active_replacement_text_encoder = app.MODEL_ID
+
+        response = TestClient(app.app).get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        health = response.json()
+        self.assertEqual(health["model_id"], app.MODEL_ID)
+        self.assertEqual(health["pipeline_class"], "flux2_klein")
+        self.assertEqual(health["base_model_id"], app.FLUX2_BASE_MODEL_ID)
+        self.assertEqual(health["replacement_text_encoder"], app.MODEL_ID)
+        self.assertTrue(health["replacement_text_encoder_active"])
+
+    def test_health_does_not_infer_activation_from_an_arbitrary_encoder(self):
+        app.pipe = SimpleNamespace(text_encoder=object())
+        app.active_replacement_text_encoder = None
+
+        health = TestClient(app.app).get("/healthz").json()
+
+        self.assertEqual(health["replacement_text_encoder"], app.MODEL_ID)
+        self.assertFalse(health["replacement_text_encoder_active"])
 
 
 class ImageEditingTests(unittest.TestCase):

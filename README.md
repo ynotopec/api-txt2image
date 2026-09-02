@@ -217,6 +217,35 @@ encoder is supplied. On startup, confirm that the log contains both
 `Loading FLUX.2 text_encoder='…'` and `FLUX.2 replacement text encoder active`;
 otherwise the replacement was not installed in the pipeline.
 
+You can also inspect `GET /healthz`: `replacement_text_encoder` identifies the
+configured component and `replacement_text_encoder_active` becomes `true` once
+the pipeline has loaded it. A value of `false` before the first generation is
+normal when lazy loading is enabled. This endpoint reports configuration and
+loading state; it does not claim that the base transformer itself is
+uncensored.
+
+There is no API-side prompt blacklist or safety checker in this service. If the
+replacement is reported active but an unwanted concept is still omitted, that
+behavior comes from the model stack: the replacement only changes prompt
+encoding, while the official FLUX.2 Klein transformer can retain its own
+training-time behavior. An "uncensored text encoder" therefore does not
+guarantee uncensored output.
+
+In practical terms, this encoder is useful when the original text encoder
+refuses, rewrites, or weakens a concept that the denoising transformer already
+knows how to render. It is also useful alongside an NSFW LoRA or DoRA: the
+adapter teaches the transformer the missing visual concept, while the
+replacement encoder passes the corresponding instruction without suppressing
+it. The encoder by itself cannot teach new anatomy, poses, objects, or styles
+to the transformer. Therefore:
+
+- replacement encoder alone: removes an encoding bottleneck, but only for
+  concepts already represented by the transformer;
+- NSFW LoRA/DoRA alone: can teach the transformer, but the stock encoder may
+  still weaken the prompt;
+- replacement encoder plus NSFW LoRA/DoRA: addresses both limitations and is
+  the intended setup when the base transformer lacks the requested concept.
+
 Because the component repository has no pipeline-level `model_index.json`, the
 service loads its weights as the `text_encoder` and obtains the encoder
 configuration, tokenizer, transformer, VAE, and scheduler from
