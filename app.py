@@ -702,9 +702,23 @@ async def shutdown() -> None:
 # -----------------------------
 @app.get("/healthz")
 def healthz():
+    replacement_text_encoder = (
+        MODEL_ID
+        if PIPELINE_CLASS == "flux2_klein"
+        and MODEL_ID.lower().endswith(FLUX2_TEXT_ENCODER_SUFFIXES)
+        else None
+    )
     return {
         "ok": True,
         "model_id": MODEL_ID,
+        "pipeline_class": PIPELINE_CLASS,
+        "base_model_id": FLUX2_BASE_MODEL_ID if replacement_text_encoder else None,
+        "replacement_text_encoder": replacement_text_encoder,
+        "replacement_text_encoder_active": bool(
+            replacement_text_encoder
+            and pipe is not None
+            and getattr(pipe, "text_encoder", None) is not None
+        ),
         "dtype": str(TORCH_DTYPE),
         "max_concurrent": MAX_CONCURRENT,
         "pipeline_loaded": pipe is not None,

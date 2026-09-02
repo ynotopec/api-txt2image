@@ -159,6 +159,19 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         self.assertTrue(fallback_kwargs["local_files_only"])
         self.assertNotIn("subfolder", fallback_kwargs)
 
+    def test_health_reports_active_replacement_encoder(self):
+        app.pipe = SimpleNamespace(text_encoder=object())
+
+        response = TestClient(app.app).get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        health = response.json()
+        self.assertEqual(health["model_id"], app.MODEL_ID)
+        self.assertEqual(health["pipeline_class"], "flux2_klein")
+        self.assertEqual(health["base_model_id"], app.FLUX2_BASE_MODEL_ID)
+        self.assertEqual(health["replacement_text_encoder"], app.MODEL_ID)
+        self.assertTrue(health["replacement_text_encoder_active"])
+
 
 class ImageEditingTests(unittest.TestCase):
     @staticmethod

@@ -217,6 +217,20 @@ encoder is supplied. On startup, confirm that the log contains both
 `Loading FLUX.2 text_encoder='…'` and `FLUX.2 replacement text encoder active`;
 otherwise the replacement was not installed in the pipeline.
 
+You can also inspect `GET /healthz`: `replacement_text_encoder` identifies the
+configured component and `replacement_text_encoder_active` becomes `true` once
+the pipeline has loaded it. A value of `false` before the first generation is
+normal when lazy loading is enabled. This endpoint reports configuration and
+loading state; it does not claim that the base transformer itself is
+uncensored.
+
+There is no API-side prompt blacklist or safety checker in this service. If the
+replacement is reported active but an unwanted concept is still omitted, that
+behavior comes from the model stack: the replacement only changes prompt
+encoding, while the official FLUX.2 Klein transformer can retain its own
+training-time behavior. An "uncensored text encoder" therefore does not
+guarantee uncensored output.
+
 Because the component repository has no pipeline-level `model_index.json`, the
 service loads its weights as the `text_encoder` and obtains the encoder
 configuration, tokenizer, transformer, VAE, and scheduler from
