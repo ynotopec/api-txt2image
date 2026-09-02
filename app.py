@@ -58,7 +58,7 @@ PIPELINE_CLASS = os.getenv("PIPELINE_CLASS", "auto_t2i").strip().lower()
 FLUX2_COMPONENT_SUFFIXES = ("-nvfp4", "-fp8")
 FLUX2_TEXT_ENCODER_SUFFIXES = ("-text-encoder", "_text_encoder")
 FLUX2_BASE_MODEL_ID = os.getenv(
-    "FLUX2_BASE_MODEL_ID", "black-forest-labs/FLUX.2-klein-base-4B"
+    "FLUX2_BASE_MODEL_ID", "black-forest-labs/FLUX.2-klein-4B"
 )
 FLUX2_TEXT_ENCODER_SUBFOLDER = os.getenv(
     "FLUX2_TEXT_ENCODER_SUBFOLDER", "text_encoder"
