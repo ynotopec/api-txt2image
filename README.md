@@ -181,70 +181,13 @@ The `model` form value is accepted for OpenAI/Open WebUI compatibility; this
 single-model server always runs the checkpoint configured by `MODEL_ID`.
 
 The `black-forest-labs/FLUX.2-klein-4b-fp8`,
-`black-forest-labs/FLUX.2-klein-9b-fp8`,
-`black-forest-labs/FLUX.2-klein-base-9b-fp8`, and `-nvfp4` repositories are
+`black-forest-labs/FLUX.2-klein-9b-fp8`, and `-nvfp4` repositories are
 single-file quantized transformer checkpoints, not complete Diffusers
 pipelines. They contain auxiliary quantization tensors that Diffusers' FLUX.2
 single-file converter does not currently handle. The API rejects these model
 IDs with a clear HTTP 400 response instead of downloading the checkpoint and
-failing during conversion.
-
-The service can instead quantize the transformer from a **complete** FLUX.2
-Klein repository at load time with TorchAO's FP8 weight-only mode. For the 9B
-model, use:
-
-```env
-MODEL_ID=black-forest-labs/FLUX.2-klein-9B
-PIPELINE_CLASS=flux2_klein
-FLUX2_TRANSFORMER_QUANTIZATION=fp8
-TORCH_DTYPE=bf16
-DEFAULT_STEPS=4
-DEFAULT_GUIDANCE=1.0
-```
-
-`TORCH_DTYPE` remains `bf16`: it controls non-quantized components and compute,
-whereas `FLUX2_TRANSFORMER_QUANTIZATION=fp8` compresses the transformer's
-weights. This reduces transformer VRAM (roughly half versus BF16 weights), but
-does not halve total pipeline memory because the text encoder, VAE, activations,
-and CUDA workspace remain. It also does not guarantee lower latency: actual
-speed depends on the GPU's FP8 kernels, image dimensions, and compilation
-overhead. FP8 requires a CUDA GPU with FP8 support; H100 is the primary target.
-The service fails early with a descriptive error on CPU. Run `./install.sh`
-after upgrading so that `torchao>=0.15.0` is installed.
-
-This path performs runtime weight-only quantization of the complete model; it
-does not make the differently packed `-fp8` single-file repository compatible.
-Use a backend that explicitly supports that file format if the exact
-pre-quantized artifact is required. `GET /healthz` reports both the requested
-and active transformer quantization modes.
-
-### What is `FLUX.2-klein-base-9b-fp8` for?
-
-`black-forest-labs/FLUX.2-klein-base-9b-fp8` distributes the **non-distilled
-Base 9B transformer** in a pre-quantized FP8 component format. “Base” describes
-the model behavior, while “FP8” describes how that transformer's weights are
-stored. It is useful with an FP8-aware backend that can combine the component
-with the required text encoder, VAE, scheduler, and tokenizer. It is not a
-standalone image-generation pipeline and is not the fast four-step distilled
-Klein 9B checkpoint.
-
-Use Base when an adapter or fine-tune specifically targets the Base model, or
-when the non-distilled guidance-capable behavior is required. In this API, the
-equivalent supported configuration loads the complete Base 9B pipeline and
-quantizes its transformer at runtime:
-
-```env
-MODEL_ID=black-forest-labs/FLUX.2-klein-base-9B
-PIPELINE_CLASS=flux2_klein
-FLUX2_TRANSFORMER_QUANTIZATION=fp8
-TORCH_DTYPE=bf16
-DEFAULT_STEPS=50
-DEFAULT_GUIDANCE=4.0
-```
-
-Do not substitute the fast-model settings (`4` steps and guidance `1.0`) for
-this Base profile. Conversely, choose the non-Base complete 9B profile shown
-above for fast distilled inference.
+failing during conversion. There is intentionally no runtime FP8 conversion in
+this service. Use an FP8-aware backend for the exact pre-quantized 9B artifact.
 
 A replacement text-encoder repository can also be selected directly. For
 example:
