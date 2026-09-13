@@ -257,12 +257,16 @@ class Flux2Fp8QuantizationTests(unittest.TestCase):
             app.make_flux2_quantization_config()
 
     def test_rejects_prequantized_component_repository(self):
-        app.MODEL_ID = "black-forest-labs/FLUX.2-klein-9b-fp8"
-
-        with self.assertRaisesRegex(
-            app.UnsupportedModelError, "single-file quantized transformer"
+        for model_id in (
+            "black-forest-labs/FLUX.2-klein-9b-fp8",
+            "black-forest-labs/FLUX.2-klein-base-9b-fp8",
         ):
-            app.load_pipeline()
+            with self.subTest(model_id=model_id):
+                app.MODEL_ID = model_id
+                with self.assertRaisesRegex(
+                    app.UnsupportedModelError, "single-file quantized transformer"
+                ):
+                    app.load_pipeline()
 
     def test_health_reports_requested_and_active_quantization(self):
         app.active_transformer_quantization = "fp8"
