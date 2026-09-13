@@ -180,13 +180,42 @@ curl "$API_ORIGIN/v1/images/edits" \
 The `model` form value is accepted for OpenAI/Open WebUI compatibility; this
 single-model server always runs the checkpoint configured by `MODEL_ID`.
 
-The `black-forest-labs/FLUX.2-klein-4b-fp8` and `-nvfp4` repositories are
+The `black-forest-labs/FLUX.2-klein-4b-fp8`,
+`black-forest-labs/FLUX.2-klein-9b-fp8`, and `-nvfp4` repositories are
 single-file quantized transformer checkpoints, not complete Diffusers
 pipelines. They contain auxiliary quantization tensors that Diffusers' FLUX.2
 single-file converter does not currently handle. The API rejects these model
 IDs with a clear HTTP 400 response instead of downloading the checkpoint and
-failing during conversion. Use the complete model above, or a backend that
-explicitly supports the quantized checkpoint format.
+failing during conversion.
+
+The service can instead quantize the transformer from a **complete** FLUX.2
+Klein repository at load time with TorchAO's FP8 weight-only mode. For the 9B
+model, use:
+
+```env
+MODEL_ID=black-forest-labs/FLUX.2-klein-9B
+PIPELINE_CLASS=flux2_klein
+FLUX2_TRANSFORMER_QUANTIZATION=fp8
+TORCH_DTYPE=bf16
+DEFAULT_STEPS=4
+DEFAULT_GUIDANCE=1.0
+```
+
+`TORCH_DTYPE` remains `bf16`: it controls non-quantized components and compute,
+whereas `FLUX2_TRANSFORMER_QUANTIZATION=fp8` compresses the transformer's
+weights. This reduces transformer VRAM (roughly half versus BF16 weights), but
+does not halve total pipeline memory because the text encoder, VAE, activations,
+and CUDA workspace remain. It also does not guarantee lower latency: actual
+speed depends on the GPU's FP8 kernels, image dimensions, and compilation
+overhead. FP8 requires a CUDA GPU with FP8 support; H100 is the primary target.
+The service fails early with a descriptive error on CPU. Run `./install.sh`
+after upgrading so that `torchao>=0.15.0` is installed.
+
+This path performs runtime weight-only quantization of the complete model; it
+does not make the differently packed `-fp8` single-file repository compatible.
+Use a backend that explicitly supports that file format if the exact
+pre-quantized artifact is required. `GET /healthz` reports both the requested
+and active transformer quantization modes.
 
 A replacement text-encoder repository can also be selected directly. For
 example:

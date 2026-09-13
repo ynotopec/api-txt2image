@@ -185,6 +185,94 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
         self.assertFalse(health["replacement_text_encoder_active"])
 
 
+class Flux2Fp8QuantizationTests(unittest.TestCase):
+    def setUp(self):
+        self.original_values = (
+            app.pipe,
+            app.MODEL_ID,
+            app.PIPELINE_CLASS,
+            app.FLUX2_TRANSFORMER_QUANTIZATION,
+            app.active_transformer_quantization,
+        )
+        app.pipe = None
+        app.MODEL_ID = "black-forest-labs/FLUX.2-klein-9B"
+        app.PIPELINE_CLASS = "flux2_klein"
+        app.FLUX2_TRANSFORMER_QUANTIZATION = "fp8"
+        app.active_transformer_quantization = None
+
+    def tearDown(self):
+        (
+            app.pipe,
+            app.MODEL_ID,
+            app.PIPELINE_CLASS,
+            app.FLUX2_TRANSFORMER_QUANTIZATION,
+            app.active_transformer_quantization,
+        ) = self.original_values
+
+    def test_loads_only_the_transformer_with_fp8_quantization(self):
+        quantization_config = object()
+        transformer = object()
+        pipeline = MagicMock()
+        pipeline.transformer = transformer
+        pipeline.to.return_value = pipeline
+
+        with (
+            patch.object(
+                app,
+                "make_flux2_quantization_config",
+                return_value=quantization_config,
+            ),
+            patch.object(
+                app.Flux2Transformer2DModel,
+                "from_pretrained",
+                return_value=transformer,
+            ) as load_transformer,
+            patch.object(
+                app.Flux2KleinPipeline, "from_pretrained", return_value=pipeline
+            ) as load_pipeline,
+        ):
+            app.load_pipeline()
+
+        transformer_args, transformer_kwargs = load_transformer.call_args
+        self.assertEqual(transformer_args, (app.MODEL_ID,))
+        self.assertEqual(transformer_kwargs["subfolder"], "transformer")
+        self.assertIs(
+            transformer_kwargs["quantization_config"], quantization_config
+        )
+        pipeline_args, pipeline_kwargs = load_pipeline.call_args
+        self.assertEqual(pipeline_args, (app.MODEL_ID,))
+        self.assertIs(pipeline_kwargs["transformer"], transformer)
+        self.assertNotIn("quantization_config", pipeline_kwargs)
+        self.assertEqual(app.active_transformer_quantization, "fp8")
+
+    def test_rejects_fp8_without_cuda_before_importing_torchao(self):
+        with patch.object(app.torch.cuda, "is_available", return_value=False):
+            with self.assertRaisesRegex(app.UnsupportedModelError, "CUDA GPU"):
+                app.make_flux2_quantization_config()
+
+    def test_rejects_unknown_quantization_mode(self):
+        app.FLUX2_TRANSFORMER_QUANTIZATION = "fp4"
+
+        with self.assertRaisesRegex(app.UnsupportedModelError, "none.*fp8"):
+            app.make_flux2_quantization_config()
+
+    def test_rejects_prequantized_component_repository(self):
+        app.MODEL_ID = "black-forest-labs/FLUX.2-klein-9b-fp8"
+
+        with self.assertRaisesRegex(
+            app.UnsupportedModelError, "single-file quantized transformer"
+        ):
+            app.load_pipeline()
+
+    def test_health_reports_requested_and_active_quantization(self):
+        app.active_transformer_quantization = "fp8"
+
+        health = TestClient(app.app).get("/healthz").json()
+
+        self.assertEqual(health["transformer_quantization"], "fp8")
+        self.assertEqual(health["transformer_quantization_active"], "fp8")
+
+
 class ImageEditingTests(unittest.TestCase):
     @staticmethod
     def _png_bytes(color="red"):

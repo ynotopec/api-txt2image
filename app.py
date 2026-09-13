@@ -25,8 +25,10 @@ from diffusers import (
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
     Flux2KleinPipeline,
+    Flux2Transformer2DModel,
     FluxPipeline,
     SanaSprintPipeline,
+    TorchAoConfig,
     ZImagePipeline,
 )
 
@@ -63,6 +65,9 @@ FLUX2_BASE_MODEL_ID = os.getenv(
 FLUX2_TEXT_ENCODER_SUBFOLDER = os.getenv(
     "FLUX2_TEXT_ENCODER_SUBFOLDER", "text_encoder"
 ).strip()
+FLUX2_TRANSFORMER_QUANTIZATION = os.getenv(
+    "FLUX2_TRANSFORMER_QUANTIZATION", "none"
+).strip().lower()
 
 ALLOWED_SIZES_ENV = os.getenv("ALLOWED_SIZES", "512x512,768x768,1024x1024")
 ALLOWED_SIZES = {s.strip() for s in ALLOWED_SIZES_ENV.split(",") if s.strip()}
@@ -85,6 +90,7 @@ gpu_sem = asyncio.Semaphore(MAX_CONCURRENT)
 
 pipe: Optional[AutoPipelineForText2Image] = None
 active_replacement_text_encoder: Optional[str] = None
+active_transformer_quantization: Optional[str] = None
 last_used_at: float = time.time()
 idle_monitor_task: Optional[asyncio.Task] = None
 
@@ -210,6 +216,31 @@ class UnsupportedModelError(RuntimeError):
     """Raised when a configured checkpoint cannot be consumed by Diffusers."""
 
 
+def make_flux2_quantization_config():
+    """Build the opt-in TorchAO configuration for a FLUX.2 transformer."""
+    if FLUX2_TRANSFORMER_QUANTIZATION in ("", "none"):
+        return None
+    if FLUX2_TRANSFORMER_QUANTIZATION != "fp8":
+        raise UnsupportedModelError(
+            "Unsupported FLUX2_TRANSFORMER_QUANTIZATION value "
+            f"'{FLUX2_TRANSFORMER_QUANTIZATION}'. Use 'none' or 'fp8'."
+        )
+    if not torch.cuda.is_available():
+        raise UnsupportedModelError(
+            "FLUX.2 FP8 quantization requires a CUDA GPU with FP8 support."
+        )
+
+    try:
+        from torchao.quantization import Float8WeightOnlyConfig
+    except ImportError as exc:
+        raise UnsupportedModelError(
+            "FLUX.2 FP8 quantization requires torchao>=0.15.0. Run ./install.sh "
+            "after updating the service."
+        ) from exc
+
+    return TorchAoConfig(Float8WeightOnlyConfig())
+
+
 def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
     """Load a component encoder, including repos with a custom checkpoint filename."""
     generation_config = GenerationConfig.from_model_config(config)
@@ -269,12 +300,13 @@ def load_text_encoder_weights(model_id: str, config, load_kwargs: dict):
 # Pipeline lifecycle
 # -----------------------------
 def load_pipeline() -> None:
-    global pipe, active_replacement_text_encoder
+    global pipe, active_replacement_text_encoder, active_transformer_quantization
 
     if pipe is not None:
         return
 
     active_replacement_text_encoder = None
+    active_transformer_quantization = None
     torch.backends.cuda.matmul.allow_tf32 = True
 
     try:
@@ -346,9 +378,9 @@ def load_pipeline() -> None:
         raise UnsupportedModelError(
             f"'{MODEL_ID}' is a single-file quantized transformer checkpoint, not a complete "
             "Diffusers pipeline. Diffusers' FLUX.2 single-file converter cannot load its "
-            "FP8/NVFP4 auxiliary tensors. Use MODEL_ID=black-forest-labs/FLUX.2-klein-4b "
-            "with PIPELINE_CLASS=flux2_klein, or run the quantized checkpoint through a "
-            "backend that explicitly supports its format."
+            "FP8/NVFP4 auxiliary tensors. Select the corresponding complete model and "
+            "set FLUX2_TRANSFORMER_QUANTIZATION=fp8 for supported NVIDIA GPUs, or run "
+            "the pre-quantized checkpoint through a backend that supports its format."
         )
 
     pipeline_model_id = MODEL_ID
@@ -379,7 +411,41 @@ def load_pipeline() -> None:
         )
         load_kwargs["text_encoder"] = text_encoder
 
+    quantization_config = None
+    if resolved_pipeline_class == "flux2_klein":
+        quantization_config = make_flux2_quantization_config()
+    elif FLUX2_TRANSFORMER_QUANTIZATION not in ("", "none"):
+        raise UnsupportedModelError(
+            "FLUX2_TRANSFORMER_QUANTIZATION is only supported with "
+            "PIPELINE_CLASS=flux2_klein."
+        )
+
+    if quantization_config is not None:
+        transformer_kwargs = {
+            key: value
+            for key, value in load_kwargs.items()
+            if key != "text_encoder"
+        }
+        transformer_kwargs.update(
+            subfolder="transformer", quantization_config=quantization_config
+        )
+        print(
+            f"[INFO] Quantizing FLUX.2 transformer from '{pipeline_model_id}' "
+            "with TorchAO FP8 weight-only quantization"
+        )
+        load_kwargs["transformer"] = Flux2Transformer2DModel.from_pretrained(
+            pipeline_model_id, **transformer_kwargs
+        )
+
     pipe = pipeline_loader.from_pretrained(pipeline_model_id, **load_kwargs).to(device)
+
+    if quantization_config is not None:
+        if getattr(pipe, "transformer", None) is not load_kwargs["transformer"]:
+            unload_pipeline()
+            raise UnsupportedModelError(
+                "The FLUX.2 pipeline did not retain the FP8-quantized transformer."
+            )
+        active_transformer_quantization = "fp8"
 
     if "text_encoder" in load_kwargs:
         if getattr(pipe, "text_encoder", None) is not load_kwargs["text_encoder"]:
@@ -428,10 +494,11 @@ def unload_pipeline() -> None:
     - We delete the pipeline and clear CUDA cache.
       The next request reloads it from disk/cache.
     """
-    global pipe, active_replacement_text_encoder
+    global pipe, active_replacement_text_encoder, active_transformer_quantization
 
     if pipe is None:
         active_replacement_text_encoder = None
+        active_transformer_quantization = None
         return
 
     print("[INFO] unloading pipeline: deleting pipeline and clearing CUDA cache")
@@ -442,6 +509,7 @@ def unload_pipeline() -> None:
     finally:
         pipe = None
         active_replacement_text_encoder = None
+        active_transformer_quantization = None
 
     gc.collect()
 
@@ -725,6 +793,8 @@ def healthz():
         "replacement_text_encoder_active": (
             replacement_text_encoder == active_replacement_text_encoder
         ),
+        "transformer_quantization": FLUX2_TRANSFORMER_QUANTIZATION,
+        "transformer_quantization_active": active_transformer_quantization,
         "dtype": str(TORCH_DTYPE),
         "max_concurrent": MAX_CONCURRENT,
         "pipeline_loaded": pipe is not None,

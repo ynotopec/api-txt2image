@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IP="${1:-${HOST:-0.0.0.0}}"
-PORT="${2:-${PORT:-}}"
+IP_ARG="${1:-}"
+PORT_ARG="${2:-}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
@@ -54,16 +54,6 @@ else
   echo "[INFO] Dependencies already up to date (idempotent run)"
 fi
 
-if [[ -z "$PORT" ]]; then
-  PORT="$($VENV_PYTHON -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')"
-  echo "[INFO] Selected free port ${PORT}"
-fi
-
-if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
-  echo "[ERROR] PORT must be an integer from 1 to 65535." >&2
-  exit 2
-fi
-
 if [[ -f ".env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -77,6 +67,21 @@ fi
 if [[ -z "${OPENAI_API_KEY:-}" && -z "${OPENAI_API_KEYS:-}" ]]; then
   echo "[ERROR] OPENAI_API_KEY or OPENAI_API_KEYS is required. Set one in environment or .env." >&2
   exit 1
+fi
+
+# Resolve these only after loading .env. Positional arguments deliberately take
+# precedence over HOST and PORT from the file.
+IP="${IP_ARG:-${HOST:-0.0.0.0}}"
+PORT="${PORT_ARG:-${PORT:-}}"
+
+if [[ -z "$PORT" ]]; then
+  PORT="$($VENV_PYTHON -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')"
+  echo "[INFO] Selected free port ${PORT}"
+fi
+
+if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+  echo "[ERROR] PORT must be an integer from 1 to 65535." >&2
+  exit 2
 fi
 
 exec "$VENV_PYTHON" -m uvicorn app:app \
