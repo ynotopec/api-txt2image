@@ -141,6 +141,35 @@ def parse_size(size_str: str) -> Tuple[int, int]:
     return w, h
 
 
+def fit_size_to_aspect_ratio(
+    source_width: int,
+    source_height: int,
+    max_width: int,
+    max_height: int,
+) -> Tuple[int, int]:
+    """Fit an image into an output box without changing its aspect ratio."""
+    scale = min(max_width / source_width, max_height / source_height)
+    width = min(max_width, int(round(source_width * scale)))
+    height = min(max_height, int(round(source_height * scale)))
+
+    # Diffusion pipelines generally require dimensions aligned to the configured
+    # latent-space multiple. Round down so the result remains inside the size
+    # requested by the client.
+    width -= width % REQUIRE_MULTIPLE_OF
+    height -= height % REQUIRE_MULTIPLE_OF
+
+    if width <= 0 or height <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The source image aspect ratio is too extreme for the requested "
+                f"size and dimension multiple ({REQUIRE_MULTIPLE_OF})."
+            ),
+        )
+
+    return width, height
+
+
 def get_expected_api_keys() -> Set[str]:
     keys_env = os.getenv("OPENAI_API_KEYS", "")
     single_key_env = os.getenv("OPENAI_API_KEY", "")
@@ -589,8 +618,9 @@ async def edit_images(
     if pipe is None:
         raise HTTPException(status_code=500, detail="Pipeline not initialized.")
 
-    # OpenAI's edit endpoint uses the requested `size` for its output. Resizing the
-    # input also avoids pipeline-specific implicit dimension rounding.
+    # The endpoint resolves `width` and `height` to the source aspect ratio before
+    # entering this function. Resizing explicitly also avoids pipeline-specific
+    # implicit dimension rounding.
     source_image = image.resize((width, height))
     generator = make_generator(seed)
 
@@ -794,7 +824,7 @@ async def create_image_edit(
     # service always uses MODEL_ID, just as the generation endpoint does.
     del model, response_format
     validate_bearer(credentials)
-    width, height = parse_size(size)
+    max_width, max_height = parse_size(size)
     # OpenAI clients use both `image` and the array-style multipart name
     # `image[]`. Open WebUI can emit the latter when its edit tool forwards
     # selected images. This service currently edits one source image, so use
@@ -806,6 +836,11 @@ async def create_image_edit(
             detail="A source image is required in multipart field 'image' or 'image[]'.",
         )
     source_image = await decode_uploaded_image(source_upload)
+    width, height = fit_size_to_aspect_ratio(
+        *source_image.size,
+        max_width,
+        max_height,
+    )
 
     async with gpu_sem:
         await ensure_pipe_loaded()

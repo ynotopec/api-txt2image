@@ -66,6 +66,10 @@ PY
 The endpoint accepts the standard `image`, `prompt`, `model`, `n`, `size`, and
 `response_format=b64_json` form fields. It also supports the optional local
 controls `steps`, `guidance_scale`, `strength`, `seed`, and `negative_prompt`.
+For edits, `size` is treated as a maximum output box: the source image's aspect
+ratio is preserved, and each output dimension is rounded down to the configured
+`REQUIRE_MULTIPLE_OF` value when necessary. For example, a 16:9 source edited
+with `size=1024x1024` produces a 1024x576 image rather than a square image.
 Parameters that are not implemented by the selected Diffusers pipeline are
 ignored; in particular, FLUX.2 Klein uses its native reference-image editing
 flow and does not expose `strength`.

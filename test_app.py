@@ -187,9 +187,9 @@ class Flux2TextEncoderLoadingTests(unittest.TestCase):
 
 class ImageEditingTests(unittest.TestCase):
     @staticmethod
-    def _png_bytes(color="red"):
+    def _png_bytes(color="red", size=(8, 8)):
         source = io.BytesIO()
-        Image.new("RGB", (8, 8), color).save(source, format="PNG")
+        Image.new("RGB", size, color).save(source, format="PNG")
         return source.getvalue()
 
     def test_openai_multipart_edit_endpoint_returns_base64_image(self):
@@ -222,6 +222,39 @@ class ImageEditingTests(unittest.TestCase):
         self.assertTrue(base64.b64decode(encoded).startswith(b"\x89PNG"))
         self.assertEqual(edit.await_args.kwargs["prompt"], "make it blue")
         self.assertEqual(edit.await_args.kwargs["width"], 512)
+
+    def test_edit_preserves_source_aspect_ratio_with_square_requested_size(self):
+        result_image = Image.new("RGB", (512, 288), "blue")
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            patch.object(app, "ensure_pipe_loaded", new=AsyncMock()),
+            patch.object(
+                app, "edit_images", new=AsyncMock(return_value=[result_image])
+            ) as edit,
+        ):
+            response = TestClient(app.app).post(
+                "/v1/images/edits",
+                headers={"Authorization": "Bearer test-key"},
+                files={
+                    "image": (
+                        "landscape.png",
+                        self._png_bytes(size=(160, 90)),
+                        "image/png",
+                    )
+                },
+                data={"prompt": "make it blue", "size": "512x512"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(edit.await_args.kwargs["width"], 512)
+        self.assertEqual(edit.await_args.kwargs["height"], 288)
+
+    def test_edit_size_is_aligned_without_stretching_source(self):
+        self.assertEqual(
+            app.fit_size_to_aspect_ratio(1200, 800, 1024, 1024),
+            (1024, 680),
+        )
 
     def test_openwebui_array_style_image_field_is_accepted(self):
         result_image = Image.new("RGB", (16, 16), "blue")
